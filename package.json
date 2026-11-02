@@ -1,7 +1,12 @@
-"dependencies": {
-  "cors": "^2.8.5",
-  "express": "^4.19.2"
-},
-"scripts": {
-  "start": "node index.js"
+{
+  "name": "calc-sync-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
 }
