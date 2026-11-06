@@ -4,189 +4,437 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+const DATA_FILE = path.join(__dirname, "state.json");
+
 app.use(cors());
 app.use(express.json());
 
-const DATA_FILE = path.join(__dirname, "config.json");
-
-// Your default settings
-let config = {
-  mode: 2, // 0 = Off, 1 = Fixed, 2 = Date+Time (+offset), 3 = Date+Time (Live)
-  fixed: 6417118,
-  chunk: 1, // 1, 2, 3, 4, or 0 (All)
-  hold: 0.5, // seconds
-  offset: 60, // seconds (+1:00)
-  redirectUrl: "https://icontrol-magic.onrender.com/"
+const DEFAULT_STATE = {
+  calc: {
+    mode: 2,
+    fixed: "3383701",
+    hold: 0.5,
+    chunk: 1,
+    offset: 60,
+    redirectUrl: "https://icontrol-magic.onrender.com/",
+    updatedAt: Date.now()
+  },
+  acaat: {
+    mode: "seq",
+    singleTarget: 18,
+    targets: [18, 23, 27, 41, 56, 9],
+    timerUrl: "clock-stopwatch://",
+    icontrolUrl: "https://icontrol-magic.onrender.com/",
+    triggerOn: "both",
+    autoDisarm: false,
+    updatedAt: Date.now()
+  },
+  peeks: [],
+  emergence: []
 };
 
-// Load saved config if it exists
-try {
-  if (fs.existsSync(DATA_FILE)) {
-    const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-    config = { ...config, ...saved };
-  }
-} catch (e) {
-  console.log("Using default config");
-}
+let state = JSON.parse(JSON.stringify(DEFAULT_STATE));
 
-function saveConfig() {
+function loadState() {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(config, null, 2));
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+      if (raw && typeof raw === "object") {
+        if (raw.calc) Object.assign(state.calc, raw.calc);
+        if (raw.acaat) Object.assign(state.acaat, raw.acaat);
+        if (Array.isArray(raw.peeks)) state.peeks = raw.peeks.slice(0, 20);
+        if (Array.isArray(raw.emergence)) state.emergence = raw.emergence.slice(0, 3);
+      }
+    }
   } catch (e) {}
 }
 
-// 1. GET /api/config (The calculator calls this on load)
+function saveState() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch (e) {}
+}
+loadState();
+
+/* ---------------- Calculator Endpoints (/api/config) ---------------- */
 app.get("/api/config", (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.json(config);
+  res.json(state.calc);
 });
 
-// 2. POST /api/config (Your remote control dashboard calls this to update settings)
 app.post("/api/config", (req, res) => {
   const b = req.body || {};
-  if ([0, 1, 2, 3].includes(Number(b.mode))) config.mode = Number(b.mode);
-  if (Number.isFinite(Number(b.fixed))) config.fixed = Number(b.fixed);
-  if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) config.chunk = Number(b.chunk);
-  if (Number.isFinite(Number(b.hold)) && Number(b.hold) >= 0.1) config.hold = Number(b.hold);
-  if (Number.isFinite(Number(b.offset))) config.offset = Math.floor(Number(b.offset));
-  if (typeof b.redirectUrl === "string" && b.redirectUrl.trim()) {
-    config.redirectUrl = b.redirectUrl.trim();
-  }
-  saveConfig();
-  res.json({ ok: true, config });
+  if ([0, 1, 2, 3].includes(Number(b.mode))) state.calc.mode = Number(b.mode);
+  if (typeof b.fixed === "string") state.calc.fixed = b.fixed.replace(/[^\d.-]/g, "");
+  if (!isNaN(Number(b.hold))) state.calc.hold = Math.max(0.15, Math.min(3, Number(b.hold)));
+  if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) state.calc.chunk = Number(b.chunk);
+  if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
+  if (typeof b.redirectUrl === "string") state.calc.redirectUrl = b.redirectUrl.trim();
+  state.calc.updatedAt = Date.now();
+  saveState();
+  res.json({ ok: true, config: state.calc });
 });
 
-// 3. Built-in Remote Control Dashboard at "/"
+/* ---------------- Stopwatch Endpoints (/api/acaat & /api/acaat/peek) ---------------- */
+app.get("/api/acaat", (req, res) => {
+  res.json({ ...state.acaat, peeks: state.peeks, emergence: state.emergence });
+});
+
+app.post("/api/acaat", (req, res) => {
+  const b = req.body || {};
+  if (["seq", "single", "open17", "off"].includes(b.mode)) state.acaat.mode = b.mode;
+  if (b.singleTarget !== undefined && !isNaN(Number(b.singleTarget))) {
+    state.acaat.singleTarget = Math.max(0, Math.min(99, Math.floor(Number(b.singleTarget))));
+  }
+  if (Array.isArray(b.targets)) {
+    state.acaat.targets = [0, 1, 2, 3, 4, 5].map(i => {
+      const v = b.targets[i];
+      return v === null || v === "" || v === undefined || isNaN(Number(v))
+        ? null
+        : Math.max(0, Math.min(99, Math.floor(Number(v))));
+    });
+  }
+  if (typeof b.timerUrl === "string" && b.timerUrl.trim()) state.acaat.timerUrl = b.timerUrl.trim();
+  if (typeof b.icontrolUrl === "string" && b.icontrolUrl.trim()) state.acaat.icontrolUrl = b.icontrolUrl.trim();
+  if (["both", "stop", "lap"].includes(b.triggerOn)) state.acaat.triggerOn = b.triggerOn;
+  if (typeof b.autoDisarm === "boolean") state.acaat.autoDisarm = b.autoDisarm;
+  state.acaat.updatedAt = Date.now();
+  saveState();
+  res.json({ ok: true, acaat: state.acaat });
+});
+
+app.post("/api/acaat/peek", (req, res) => {
+  const b = req.body || {};
+  const entry = {
+    type: String(b.type || "STOP"),
+    realFormatted: String(b.realFormatted || "00:00.00"),
+    shownFormatted: String(b.shownFormatted || "00:00.00"),
+    realSec: Number(b.realSec) || 0,
+    realCs: Number(b.realCs) || 0,
+    at: b.at || new Date().toLocaleTimeString()
+  };
+  if (entry.type.startsWith("RESET #")) {
+    // Parse Emergence 3-person reset sequence (e.g. "00:01.79 — 00:02.41")
+    const parts = entry.realFormatted.split("—").map(s => s.trim()).filter(Boolean);
+    state.emergence = parts.map(fmt => ({
+      formatted: fmt,
+      largeInt: parseInt(fmt.replace(/[^0-9]/g, ""), 10) || 0
+    }));
+  }
+  state.peeks.unshift(entry);
+  if (state.peeks.length > 20) state.peeks.pop();
+  saveState();
+  res.json({ ok: true });
+});
+
+app.post("/api/acaat/clear-peeks", (req, res) => {
+  state.peeks = [];
+  state.emergence = [];
+  saveState();
+  res.json({ ok: true });
+});
+
+/* ---------------- Unified Mobile Control Dashboard (/) ---------------- */
 app.get("/", (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Calc Remote Control</title>
+<title>Magic Remote</title>
 <style>
-  :root{--bg:#1c1c1e;--card:#2c2c2e;--fill:#3a3a3c;--op:#ff9f0a;--sep:rgba(84,84,88,.55);--lbl:#8d8d93;}
+  :root{--bg:#000;--card:#1c1c1e;--fill:#2c2c2e;--orange:#ff9f0a;--green:#30d158;--gray:#8e8e93;}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  body{margin:0;padding:20px 16px 60px;background:var(--bg);color:#fff;
-    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;}
-  h1{font-size:20px;text-align:center;margin:4px 0 20px;}
-  .sec-h{font-size:13px;color:var(--lbl);text-transform:uppercase;letter-spacing:.05em;margin:20px 4px 8px;}
-  .card{background:var(--card);border-radius:12px;overflow:hidden;}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:0 15px;font-size:17px;}
-  .row+.row{border-top:.5px solid var(--sep);}
-  .opt{cursor:pointer;}
-  .opt .chk{color:var(--op);font-weight:700;opacity:0;}
-  .opt.sel .chk{opacity:1;}
-  input[type="text"],input[type="number"]{
-    background:var(--fill);border:0;border-radius:8px;color:#fff;font-size:16px;
-    padding:8px 12px;text-align:right;width:180px;outline:none;
-  }
-  .url-in{width:100%!important;text-align:left!important;margin:10px 0;}
-  .seg{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;padding:12px 14px;}
-  .seg button{height:36px;border:0;border-radius:8px;background:var(--fill);color:#fff;font-size:16px;cursor:pointer;}
-  .seg button.sel{background:var(--op);color:#1c1c1e;font-weight:600;}
-  .save-btn{
-    width:100%;margin-top:24px;height:50px;border:0;border-radius:12px;
-    background:var(--op);color:#000;font-size:17px;font-weight:600;cursor:pointer;
-  }
-  .save-btn:active{opacity:.8;}
-  .toast{text-align:center;color:#30d158;font-size:15px;margin-top:12px;min-height:20px;}
+  body{margin:0;padding:16px 14px 60px;background:var(--bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;}
+  .wrap{max-width:460px;margin:0 auto;}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--card);padding:4px;border-radius:12px;margin-bottom:16px;}
+  .tbtn{border:0;background:none;color:var(--gray);font-size:15px;font-weight:600;padding:10px;border-radius:9px;cursor:pointer;}
+  .tbtn.on{background:var(--orange);color:#000;}
+  .pane{display:none;} .pane.on{display:block;}
+  .sec{font-size:12px;color:var(--gray);text-transform:uppercase;letter-spacing:.05em;margin:18px 4px 7px;}
+  .card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
+  .row:last-child{margin-bottom:0;}
+  label{font-size:15px;color:#e5e5ea;}
+  input,select{background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:16px;outline:none;}
+  input[type="text"],input[type="url"]{width:100%;margin-top:6px;}
+  .grid6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px;}
+  .grid6 input{width:100%;text-align:center;padding:9px 0;font-weight:600;}
+  .btn{width:100%;border:0;border-radius:12px;background:var(--orange);color:#000;font-size:17px;font-weight:700;padding:14px;cursor:pointer;margin-top:8px;}
+  .btn:active{opacity:.8;}
+  .peek-hero{display:flex;align-items:center;justify-content:space-between;background:#111c14;border:1px solid #1e4628;border-radius:12px;padding:12px 14px;margin-bottom:10px;}
+  .peek-big{font-size:26px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;}
+  .peek-meta{font-size:13px;color:#a1a1a6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  .peek-list{font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#d1d1d6;max-height:150px;overflow-y:auto;white-space:pre-wrap;}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;font-weight:700;padding:10px 20px;border-radius:999px;opacity:0;transition:opacity .2s;pointer-events:none;}
+  .toast.on{opacity:1;}
 </style>
 </head>
 <body>
-  <h1>Calculator Remote</h1>
-
-  <div class="sec-h">Force Target</div>
-  <div class="card" id="modeList">
-    <div class="row opt" data-mode="0"><span>Off</span><span class="chk">✓</span></div>
-    <div class="row opt" data-mode="1"><span>Fixed number</span><span class="chk">✓</span></div>
-    <div class="row opt" data-mode="2"><span>Date + time (with offset)</span><span class="chk">✓</span></div>
-    <div class="row opt" data-mode="3"><span>Date + time (live)</span><span class="chk">✓</span></div>
-    <div class="row"><span>Force number</span><input id="fixedIn" type="number" inputmode="numeric"></div>
-    <div class="row"><span>Time offset (seconds)</span><input id="offsetIn" type="number" inputmode="numeric"></div>
+<div class="wrap">
+  <div class="tabs">
+    <button class="tbtn on" id="tabSw" type="button">⏱ Stopwatch Remote</button>
+    <button class="tbtn" id="tabCalc" type="button">🧮 Calculator Remote</button>
   </div>
 
-  <div class="sec-h">Digits Per Press</div>
-  <div class="card seg" id="chunkSeg">
-    <button type="button" data-chunk="1">1</button>
-    <button type="button" data-chunk="2">2</button>
-    <button type="button" data-chunk="3">3</button>
-    <button type="button" data-chunk="4">4</button>
-    <button type="button" data-chunk="0">All</button>
+  <!-- STOPWATCH PANE -->
+  <div class="pane on" id="paneSw">
+    <div class="sec">Live Spectator Peek (Auto-Updates)</div>
+    <div class="card">
+      <div class="peek-hero" style="margin-bottom:8px;">
+        <div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">3-Person Reset Sum (Emergence)</div>
+          <div class="peek-big" id="emSum">—</div>
+          <div class="peek-meta" id="emSlots" style="margin-top:2px;">No Reset times locked yet</div>
+        </div>
+      </div>
+      <div class="peek-hero">
+        <div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Latest Real Stop</div>
+          <div class="peek-big" id="liveReal" style="font-size:21px;color:#fff;">—</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="peek-meta" id="liveBreakdown">Sec: — | Dec: —</div>
+          <div class="peek-meta" id="liveShown">Shown: —</div>
+        </div>
+      </div>
+      <div class="peek-list" id="peekLog">Waiting for spectator stops...</div>
+      <button type="button" id="clearPeeksBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Clear Peek History</button>
+    </div>
+
+    <div class="sec">Stopwatch Force Controls</div>
+    <div class="card">
+      <div class="row">
+        <label>Force Mode</label>
+        <select id="swMode">
+          <option value="seq">Lotto / 6-Number Sequence</option>
+          <option value="single">Single Decimal (.00–.99)</option>
+          <option value="open17">Digits Add Up to 17</option>
+          <option value="off">Off (100% Fair)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Single Decimal (.00–.99)</label>
+        <input id="swSingle" type="number" min="0" max="99" style="width:80px;text-align:center;">
+      </div>
+      <div>
+        <label>Lotto 6-Stop Sequence (00–99)</label>
+        <div class="grid6">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="0">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="1">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="2">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="3">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="4">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="5">
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">Triggers & Corner Redirects</div>
+    <div class="card">
+      <div class="row">
+        <label>Trigger Force On</label>
+        <select id="swTrigger">
+          <option value="both">Stop & Lap</option>
+          <option value="stop">Stop Only</option>
+          <option value="lap">Lap Only</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Auto-Disarm After Force</label>
+        <input id="swDisarm" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
+      </div>
+      <div style="margin-top:10px;">
+        <label>Top-Left Hold (Real Timer App URL)</label>
+        <input id="swTimerUrl" type="text" placeholder="clock-stopwatch://">
+      </div>
+      <div style="margin-top:10px;">
+        <label>Top-Right Hold (iControl URL)</label>
+        <input id="swIcontrolUrl" type="text" placeholder="https://icontrol-magic.onrender.com/">
+      </div>
+    </div>
+    <button class="btn" id="saveSwBtn" type="button">Push Live to Stopwatch</button>
   </div>
 
-  <div class="sec-h">Hold Duration</div>
-  <div class="card">
-    <div class="row"><span>Hold + and % for</span><span id="holdLbl">0.50s</span></div>
-    <div class="row"><input id="holdIn" type="range" min="0.2" max="1.5" step="0.05" style="width:100%;accent-color:#ff9f0a"></div>
+  <!-- CALCULATOR PANE -->
+  <div class="pane" id="paneCalc">
+    <div class="sec">Calculator Force Settings</div>
+    <div class="card">
+      <div class="row">
+        <label>Force Mode</label>
+        <select id="cMode">
+          <option value="0">Off</option>
+          <option value="1">Fixed Number</option>
+          <option value="2">Date + Time (Offset)</option>
+          <option value="3">Date + Time (Live)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Fixed Force Number</label>
+        <input id="cFixed" type="text" style="width:140px;text-align:right;">
+      </div>
+      <div class="row">
+        <label>Time Offset (Seconds)</label>
+        <input id="cOffset" type="number" style="width:90px;text-align:center;">
+      </div>
+      <div class="row">
+        <label>Digits Per Press</label>
+        <select id="cChunk">
+          <option value="1">1 Digit</option>
+          <option value="2">2 Digits</option>
+          <option value="3">3 Digits</option>
+          <option value="4">4 Digits</option>
+          <option value="0">All at Once</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Hold Duration (s)</label>
+        <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" style="width:90px;text-align:center;">
+      </div>
+      <div style="margin-top:10px;">
+        <label>Top-Left Clock Button Redirect URL</label>
+        <input id="cRedirect" type="text">
+      </div>
+    </div>
+    <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
+</div>
 
-  <div class="sec-h">Clock Button Redirect URL</div>
-  <div class="card">
-    <div class="row"><input class="url-in" id="urlIn" type="text"></div>
-  </div>
-
-  <button class="save-btn" id="saveBtn">Push Live to Calculator</button>
-  <div class="toast" id="toast"></div>
+<div class="toast" id="toast">Saved & Pushed Live!</div>
 
 <script>
-let state = {};
-const modeList = document.getElementById("modeList");
-const chunkSeg = document.getElementById("chunkSeg");
-const fixedIn = document.getElementById("fixedIn");
-const offsetIn = document.getElementById("offsetIn");
-const holdIn = document.getElementById("holdIn");
-const holdLbl = document.getElementById("holdLbl");
-const urlIn = document.getElementById("urlIn");
-const toast = document.getElementById("toast");
-
-function paint(){
-  modeList.querySelectorAll(".opt").forEach(r => r.classList.toggle("sel", Number(r.dataset.mode) === state.mode));
-  chunkSeg.querySelectorAll("button").forEach(b => b.classList.toggle("sel", Number(b.dataset.chunk) === state.chunk));
-  fixedIn.value = state.fixed;
-  offsetIn.value = state.offset;
-  holdIn.value = state.hold;
-  holdLbl.textContent = Number(state.hold).toFixed(2) + "s";
-  urlIn.value = state.redirectUrl;
+const p2 = n => String(Math.floor(Math.max(0, n))).padStart(2, "0");
+function flashToast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg || "Saved & Pushed Live!";
+  t.classList.add("on");
+  setTimeout(() => t.classList.remove("on"), 1800);
 }
 
-fetch("/api/config").then(r => r.json()).then(d => { state = d; paint(); });
+document.getElementById("tabSw").onclick = () => {
+  document.getElementById("tabSw").classList.add("on");
+  document.getElementById("tabCalc").classList.remove("on");
+  document.getElementById("paneSw").classList.add("on");
+  document.getElementById("paneCalc").classList.remove("on");
+};
+document.getElementById("tabCalc").onclick = () => {
+  document.getElementById("tabCalc").classList.add("on");
+  document.getElementById("tabSw").classList.remove("on");
+  document.getElementById("paneCalc").classList.add("on");
+  document.getElementById("paneSw").classList.remove("on");
+};
 
-modeList.addEventListener("click", e => {
-  const r = e.target.closest(".opt");
-  if (!r) return;
-  state.mode = Number(r.dataset.mode);
-  paint();
-});
-chunkSeg.addEventListener("click", e => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  state.chunk = Number(b.dataset.chunk);
-  paint();
-});
-holdIn.addEventListener("input", () => {
-  state.hold = parseFloat(holdIn.value);
-  holdLbl.textContent = state.hold.toFixed(2) + "s";
-});
+let swLoaded = false;
+async function loadSw(onlyPeeks){
+  try {
+    const r = await fetch("/api/acaat", { cache: "no-store" });
+    const d = await r.json();
+    if (!onlyPeeks && !swLoaded){
+      swLoaded = true;
+      document.getElementById("swMode").value = d.mode || "seq";
+      document.getElementById("swSingle").value = p2(d.singleTarget ?? 18);
+      document.querySelectorAll(".sw-slot").forEach(inp => {
+        const v = (d.targets || [])[Number(inp.dataset.i)];
+        inp.value = (v !== null && v !== undefined) ? p2(v) : "";
+      });
+      document.getElementById("swTrigger").value = d.triggerOn || "both";
+      document.getElementById("swDisarm").checked = !!d.autoDisarm;
+      document.getElementById("swTimerUrl").value = d.timerUrl || "clock-stopwatch://";
+      document.getElementById("swIcontrolUrl").value = d.icontrolUrl || "https://icontrol-magic.onrender.com/";
+    }
+    const em = d.emergence || [];
+    if (em.length){
+      const sum = em.reduce((acc, it) => acc + (Number(it.largeInt) || 0), 0);
+      document.getElementById("emSum").textContent = String(sum);
+      document.getElementById("emSlots").textContent = em.map((it, idx) => \`#\${idx+1}: \${it.formatted} (\${it.largeInt})\`).join("  •  ");
+    } else {
+      document.getElementById("emSum").textContent = "—";
+      document.getElementById("emSlots").textContent = "No Reset times locked yet";
+    }
+    const peeks = d.peeks || [];
+    if (peeks.length){
+      const latest = peeks[0];
+      document.getElementById("liveReal").textContent = latest.realFormatted;
+      document.getElementById("liveBreakdown").textContent = \`Sec: \${latest.realSec} | Dec: .\${p2(latest.realCs)}\`;
+      document.getElementById("liveShown").textContent = \`Shown: \${latest.shownFormatted}\`;
+      document.getElementById("peekLog").textContent = peeks.map(
+        p => \`[\${p.at}] \${p.type}: REAL \${p.realFormatted} (s:\${p.realSec} c:.\${p2(p.realCs)}) → Shown \${p.shownFormatted}\`
+      ).join("\\n");
+    } else {
+      document.getElementById("liveReal").textContent = "—";
+      document.getElementById("liveBreakdown").textContent = "Sec: — | Dec: —";
+      document.getElementById("liveShown").textContent = "Shown: —";
+      document.getElementById("peekLog").textContent = "Waiting for spectator stops...";
+    }
+  } catch(e){}
+}
 
-document.getElementById("saveBtn").addEventListener("click", async () => {
-  state.fixed = Number(fixedIn.value) || 0;
-  state.offset = Number(offsetIn.value) || 0;
-  state.redirectUrl = urlIn.value.trim();
-  const res = await fetch("/api/config", {
+async function loadCalc(){
+  try {
+    const r = await fetch("/api/config", { cache: "no-store" });
+    const d = await r.json();
+    document.getElementById("cMode").value = String(d.mode ?? 2);
+    document.getElementById("cFixed").value = d.fixed || "";
+    document.getElementById("cOffset").value = d.offset ?? 60;
+    document.getElementById("cChunk").value = String(d.chunk ?? 1);
+    document.getElementById("cHold").value = d.hold ?? 0.5;
+    document.getElementById("cRedirect").value = d.redirectUrl || "";
+  } catch(e){}
+}
+
+loadSw(false);
+loadCalc();
+setInterval(() => loadSw(true), 1500);
+
+document.getElementById("saveSwBtn").onclick = async () => {
+  const targets = [];
+  document.querySelectorAll(".sw-slot").forEach(inp => {
+    const raw = inp.value.trim();
+    targets[Number(inp.dataset.i)] = raw === "" ? null : Number(raw);
+  });
+  const body = {
+    mode: document.getElementById("swMode").value,
+    singleTarget: Number(document.getElementById("swSingle").value || 0),
+    targets,
+    triggerOn: document.getElementById("swTrigger").value,
+    autoDisarm: document.getElementById("swDisarm").checked,
+    timerUrl: document.getElementById("swTimerUrl").value.trim(),
+    icontrolUrl: document.getElementById("swIcontrolUrl").value.trim()
+  };
+  await fetch("/api/acaat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(state)
+    body: JSON.stringify(body)
   });
-  if (res.ok) {
-    toast.textContent = "✓ Live config updated!";
-    setTimeout(() => toast.textContent = "", 2500);
-  }
-});
+  flashToast("Stopwatch Updated Live!");
+};
+
+document.getElementById("clearPeeksBtn").onclick = async () => {
+  await fetch("/api/acaat/clear-peeks", { method: "POST" });
+  loadSw(true);
+};
+
+document.getElementById("saveCalcBtn").onclick = async () => {
+  const body = {
+    mode: Number(document.getElementById("cMode").value),
+    fixed: document.getElementById("cFixed").value,
+    offset: Number(document.getElementById("cOffset").value),
+    chunk: Number(document.getElementById("cChunk").value),
+    hold: Number(document.getElementById("cHold").value),
+    redirectUrl: document.getElementById("cRedirect").value
+  };
+  await fetch("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  flashToast("Calculator Updated Live!");
+};
 </script>
 </body>
 </html>`);
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+app.listen(PORT, () => {
+  console.log("Magic Remote Backend running on port " + PORT);
+});
