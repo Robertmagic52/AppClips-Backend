@@ -38,6 +38,7 @@ const DEFAULT_STATE = {
     mode: "seq",
     singleTarget: 18,
     targets: [18, 23, 27, 41, 56, 9],
+    scrambleLotto: false,
     leftRedirectUrl: "dice",
     leftOpenSafari: false,
     rightRedirectUrl: "https://icontrol-magic.onrender.com/",
@@ -158,6 +159,7 @@ app.post("/api/acaat", (req, res) => {
         : Math.max(0, Math.min(99, Math.floor(Number(v))));
     });
   }
+  if (typeof b.scrambleLotto === "boolean") state.acaat.scrambleLotto = b.scrambleLotto;
   if (typeof b.leftRedirectUrl === "string" && b.leftRedirectUrl.trim()) {
     state.acaat.leftRedirectUrl = b.leftRedirectUrl.trim();
   }
@@ -334,7 +336,10 @@ app.get("/", (req, res) => {
         <input id="swSingle" type="number" min="0" max="99" style="width:80px;text-align:center;">
       </div>
       <div>
-        <label>Lotto 6-Stop Sequence (00–99)</label>
+        <div class="row" style="margin-bottom:4px;">
+          <label>Lotto 6-Stop Sequence (00–99)</label>
+          <button type="button" id="swShuffleBtn" class="chip" style="color:var(--orange);border:1px solid var(--orange);">🔀 Scramble Boxes</button>
+        </div>
         <div class="grid6">
           <input type="number" min="0" max="99" class="sw-slot" data-i="0">
           <input type="number" min="0" max="99" class="sw-slot" data-i="1">
@@ -345,6 +350,10 @@ app.get("/", (req, res) => {
         </div>
       </div>
       <div class="row" style="margin-top:12px;">
+        <label>Scramble Lotto Order Automatically</label>
+        <input id="swScramble" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
+      </div>
+      <div class="row">
         <label>Trigger Force On</label>
         <select id="swTrigger">
           <option value="both">Stop & Lap</option>
@@ -651,6 +660,7 @@ async function loadSw(onlyPeeks){
         const v = (d.targets || [])[Number(inp.dataset.i)];
         inp.value = (v !== null && v !== undefined) ? p2(v) : "";
       });
+      document.getElementById("swScramble").checked = !!d.scrambleLotto;
       document.getElementById("swTrigger").value = d.triggerOn || "both";
       document.getElementById("swDisarm").checked = !!d.autoDisarm;
       document.getElementById("swLeftUrl").value = d.leftRedirectUrl || "dice";
@@ -727,6 +737,7 @@ async function pushSwNow(toastText){
     mode: document.getElementById("swMode").value,
     singleTarget: Number(document.getElementById("swSingle").value || 0),
     targets,
+    scrambleLotto: document.getElementById("swScramble").checked,
     triggerOn: document.getElementById("swTrigger").value,
     autoDisarm: document.getElementById("swDisarm").checked,
     leftRedirectUrl: document.getElementById("swLeftUrl").value.trim() || "dice",
@@ -781,7 +792,19 @@ document.getElementById("swMode").onchange = () => {
   syncSwPills();
   pushSwNow("Stopwatch Mode Updated!");
 };
-["swLeftSafari","swRightSafari","swIcontrolSafari","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
+document.getElementById("swShuffleBtn").onclick = () => {
+  const inputs = Array.from(document.querySelectorAll(".sw-slot"));
+  const vals = inputs.map(inp => inp.value.trim()).filter(v => v !== "");
+  for (let i = vals.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [vals[i], vals[j]] = [vals[j], vals[i]];
+  }
+  inputs.forEach((inp, idx) => {
+    inp.value = vals[idx] !== undefined ? p2(Number(vals[idx])) : "";
+  });
+  pushSwNow("Lotto Numbers Scrambled Live!");
+};
+["swLeftSafari","swRightSafari","swIcontrolSafari","swScramble","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushSwNow("Stopwatch Setting Saved Live!");
 });
