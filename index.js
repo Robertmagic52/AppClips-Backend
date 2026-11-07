@@ -24,6 +24,8 @@ const DEFAULT_STATE = {
     hold: 0.5,
     chunk: 1,
     offset: 60,
+    autoOpOnLock: false,
+    hintStyle: "both",
     redirectUrl: "https://icontrol-magic.onrender.com/",
     redirectOpenSafari: true,
     clockSiteUrl: "",
@@ -118,6 +120,8 @@ app.post("/api/config", (req, res) => {
   if (!isNaN(Number(b.hold))) state.calc.hold = Math.max(0.15, Math.min(3, Number(b.hold)));
   if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) state.calc.chunk = Number(b.chunk);
   if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
+  if (typeof b.autoOpOnLock === "boolean") state.calc.autoOpOnLock = b.autoOpOnLock;
+  if (["both", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
   if (typeof b.redirectUrl === "string") state.calc.redirectUrl = b.redirectUrl.trim();
   if (typeof b.redirectOpenSafari === "boolean") state.calc.redirectOpenSafari = b.redirectOpenSafari;
   if (typeof b.clockSiteUrl === "string") state.calc.clockSiteUrl = b.clockSiteUrl.trim();
@@ -253,6 +257,9 @@ app.get("/", (req, res) => {
   input[type="text"],input[type="url"]{width:100%;margin-top:6px;}
   .grid6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px;}
   .grid6 input{width:100%;text-align:center;padding:9px 0;font-weight:600;}
+  .mode-pills{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;}
+  .mpill{border:1px solid #3a3a3c;border-radius:9px;background:var(--fill);color:#e5e5ea;font-size:12px;font-weight:600;padding:9px 4px;cursor:pointer;text-align:center;}
+  .mpill.sel{background:var(--orange);color:#000;border-color:var(--orange);}
   .btn{width:100%;border:0;border-radius:12px;background:var(--orange);color:#000;font-size:17px;font-weight:700;padding:14px;cursor:pointer;margin-top:8px;}
   .btn:active{opacity:.8;}
   .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;}
@@ -289,6 +296,7 @@ app.get("/", (req, res) => {
           <div class="peek-big" id="emSum">—</div>
           <div class="peek-meta" id="emSlots" style="margin-top:2px;">No Reset times locked yet</div>
         </div>
+        <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Force on Calc</button>
       </div>
       <div class="peek-hero">
         <div>
@@ -304,8 +312,14 @@ app.get("/", (req, res) => {
       <button type="button" id="clearPeeksBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Clear Peek History</button>
     </div>
 
-    <div class="sec">Stopwatch Force Controls</div>
+    <div class="sec">Stopwatch Force Controls (Tap Mode to Switch Live)</div>
     <div class="card">
+      <div class="mode-pills" id="swModePills">
+        <button type="button" class="mpill" data-mode="seq">Lotto 6-Seq</button>
+        <button type="button" class="mpill" data-mode="single">Single .XX</button>
+        <button type="button" class="mpill" data-mode="open17">Sum = 17</button>
+        <button type="button" class="mpill" data-mode="off">Off (Fair)</button>
+      </div>
       <div class="row">
         <label>Force Mode</label>
         <select id="swMode">
@@ -381,8 +395,14 @@ app.get("/", (req, res) => {
 
   <!-- CALCULATOR PANE -->
   <div class="pane" id="paneCalc">
-    <div class="sec">Calculator Force Settings</div>
+    <div class="sec">Calculator Force Settings (Tap Mode to Switch Live)</div>
     <div class="card">
+      <div class="mode-pills" id="cModePills">
+        <button type="button" class="mpill" data-mode="0">Off</button>
+        <button type="button" class="mpill" data-mode="1">Fixed</button>
+        <button type="button" class="mpill" data-mode="2">Time +Offset</button>
+        <button type="button" class="mpill" data-mode="3">Time Live</button>
+      </div>
       <div class="row">
         <label>Force Mode</label>
         <select id="cMode">
@@ -413,6 +433,18 @@ app.get("/", (req, res) => {
       <div class="row">
         <label>Hold Duration (s)</label>
         <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" style="width:90px;text-align:center;">
+      </div>
+      <div class="row">
+        <label>Auto-type + or − on Hold %</label>
+        <input id="cAutoOp" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
+      </div>
+      <div class="row">
+        <label>Hint Digit Style</label>
+        <select id="cHintStyle">
+          <option value="both">Bolded Edge + Small Dot</option>
+          <option value="dot">Small Dot Only</option>
+          <option value="bright">Bolded Edge Only</option>
+        </select>
       </div>
     </div>
 
@@ -472,12 +504,27 @@ app.get("/", (req, res) => {
 <script>
 const p2 = n => String(Math.floor(Math.max(0, n))).padStart(2, "0");
 let savedSites = [];
+let latestEmSum = 0;
 
 function flashToast(msg){
   const t = document.getElementById("toast");
   t.textContent = msg || "Saved & Pushed Live!";
   t.classList.add("on");
   setTimeout(() => t.classList.remove("on"), 1800);
+}
+
+function syncSwPills(){
+  const cur = document.getElementById("swMode").value;
+  document.querySelectorAll("#swModePills .mpill").forEach(b => {
+    b.classList.toggle("sel", b.dataset.mode === cur);
+  });
+}
+
+function syncCalcPills(){
+  const cur = String(document.getElementById("cMode").value);
+  document.querySelectorAll("#cModePills .mpill").forEach(b => {
+    b.classList.toggle("sel", b.dataset.mode === cur);
+  });
 }
 
 document.getElementById("tabSw").onclick = () => {
@@ -579,6 +626,7 @@ async function loadSw(onlyPeeks){
       swLoaded = true;
       if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
       document.getElementById("swMode").value = d.mode || "seq";
+      syncSwPills();
       document.getElementById("swSingle").value = p2(d.singleTarget ?? 18);
       document.querySelectorAll(".sw-slot").forEach(inp => {
         const v = (d.targets || [])[Number(inp.dataset.i)];
@@ -597,9 +645,11 @@ async function loadSw(onlyPeeks){
     const em = d.emergence || [];
     if (em.length){
       const sum = em.reduce((acc, it) => acc + (Number(it.largeInt) || 0), 0);
+      latestEmSum = sum;
       document.getElementById("emSum").textContent = String(sum);
       document.getElementById("emSlots").textContent = em.map((it, idx) => \`#\${idx+1}: \${it.formatted} (\${it.largeInt})\`).join("  •  ");
     } else {
+      latestEmSum = 0;
       document.getElementById("emSum").textContent = "—";
       document.getElementById("emSlots").textContent = "No Reset times locked yet";
     }
@@ -627,10 +677,13 @@ async function loadCalc(){
     const d = await r.json();
     if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
     document.getElementById("cMode").value = String(d.mode ?? 2);
+    syncCalcPills();
     document.getElementById("cFixed").value = d.fixed || "";
     document.getElementById("cOffset").value = d.offset ?? 60;
     document.getElementById("cChunk").value = String(d.chunk ?? 1);
     document.getElementById("cHold").value = d.hold ?? 0.5;
+    document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
+    document.getElementById("cHintStyle").value = d.hintStyle || "both";
     document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
     document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
     document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
@@ -645,7 +698,7 @@ loadSw(false);
 loadCalc();
 setInterval(() => loadSw(true), 1500);
 
-document.getElementById("saveSwBtn").onclick = async () => {
+async function pushSwNow(toastText){
   const targets = [];
   document.querySelectorAll(".sw-slot").forEach(inp => {
     const raw = inp.value.trim();
@@ -670,21 +723,18 @@ document.getElementById("saveSwBtn").onclick = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  flashToast("Stopwatch Updated Live!");
-};
+  flashToast(toastText || "Stopwatch Updated Live!");
+}
 
-document.getElementById("clearPeeksBtn").onclick = async () => {
-  await fetch("/api/acaat/clear-peeks", { method: "POST" });
-  loadSw(true);
-};
-
-document.getElementById("saveCalcBtn").onclick = async () => {
+async function pushCalcNow(toastText){
   const body = {
     mode: Number(document.getElementById("cMode").value),
     fixed: document.getElementById("cFixed").value,
     offset: Number(document.getElementById("cOffset").value),
     chunk: Number(document.getElementById("cChunk").value),
     hold: Number(document.getElementById("cHold").value),
+    autoOpOnLock: document.getElementById("cAutoOp").checked,
+    hintStyle: document.getElementById("cHintStyle").value,
     clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
     clockOpenSafari: document.getElementById("cClockSafari").checked,
     redirectUrl: document.getElementById("cRedirect").value.trim(),
@@ -698,8 +748,54 @@ document.getElementById("saveCalcBtn").onclick = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  flashToast("Calculator Updated Live!");
+  flashToast(toastText || "Calculator Updated Live!");
+}
+
+document.querySelectorAll("#swModePills .mpill").forEach(btn => {
+  btn.onclick = () => {
+    document.getElementById("swMode").value = btn.dataset.mode;
+    syncSwPills();
+    pushSwNow("Stopwatch Mode: " + btn.textContent);
+  };
+});
+document.getElementById("swMode").onchange = () => {
+  syncSwPills();
+  pushSwNow("Stopwatch Mode Updated!");
 };
+
+document.querySelectorAll("#cModePills .mpill").forEach(btn => {
+  btn.onclick = () => {
+    document.getElementById("cMode").value = btn.dataset.mode;
+    syncCalcPills();
+    pushCalcNow("Calculator Mode: " + btn.textContent);
+  };
+});
+document.getElementById("cMode").onchange = () => {
+  syncCalcPills();
+  pushCalcNow("Calculator Mode Updated!");
+};
+document.getElementById("cAutoOp").onchange = () => pushCalcNow("Hold % Auto-Op Updated!");
+document.getElementById("cHintStyle").onchange = () => pushCalcNow("Hint Style Updated!");
+
+document.getElementById("pushSumToCalcBtn").onclick = async () => {
+  if (!latestEmSum){
+    flashToast("No Reset Sum Yet!");
+    return;
+  }
+  document.getElementById("cMode").value = "1";
+  document.getElementById("cFixed").value = String(latestEmSum);
+  syncCalcPills();
+  await pushCalcNow("Calc Fixed Set to " + latestEmSum + "!");
+};
+
+document.getElementById("saveSwBtn").onclick = () => pushSwNow("Stopwatch Updated Live!");
+
+document.getElementById("clearPeeksBtn").onclick = async () => {
+  await fetch("/api/acaat/clear-peeks", { method: "POST" });
+  loadSw(true);
+};
+
+document.getElementById("saveCalcBtn").onclick = () => pushCalcNow("Calculator Updated Live!");
 </script>
 </body>
 </html>`);
