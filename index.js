@@ -556,8 +556,11 @@ function renderSavedSitesUI(){
       btn.onclick = () => {
         document.getElementById(targetId).value = btn.dataset.url;
         if (safariId && document.getElementById(safariId)){
-          document.getElementById(safariId).checked = (btn.dataset.saf === "1");
+          if (btn.dataset.url === "dice") document.getElementById(safariId).checked = false;
+          else if (btn.dataset.saf === "1") document.getElementById(safariId).checked = true;
         }
+        if (targetId.startsWith("sw")) pushSwNow("Redirect Updated Live!");
+        else pushCalcNow("Redirect Updated Live!");
       };
     });
   });
@@ -570,12 +573,28 @@ function renderSavedSitesUI(){
   box.innerHTML = savedSites.map((s, idx) => \`
     <div class="site-row">
       <div class="site-meta">
-        <div class="site-title">\${(s.name || s.url).replace(/</g, "&lt;")} <span style="font-size:11px;color:#ff9f0a;">(\${s.openInSafari ? "Safari Tab" : "App Clip"})</span></div>
+        <div class="site-title">\${(s.name || s.url).replace(/</g, "&lt;")}</div>
         <div class="site-sub">\${s.url.replace(/</g, "&lt;")}</div>
       </div>
+      <button type="button" class="chip mode-tog-btn" data-idx="\${idx}" style="color:#ff9f0a;">\${s.openInSafari ? "Safari Tab" : "App Clip"}</button>
       <button type="button" class="del-btn" data-idx="\${idx}">Delete</button>
     </div>
   \`).join("");
+  box.querySelectorAll(".mode-tog-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const idx = Number(btn.dataset.idx);
+      if (savedSites[idx]){
+        savedSites[idx].openInSafari = !savedSites[idx].openInSafari;
+        await fetch("/api/sites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ savedSites })
+        });
+        renderSavedSitesUI();
+        flashToast(savedSites[idx].openInSafari ? "Set to Safari Tab" : "Set to App Clip");
+      }
+    };
+  });
   box.querySelectorAll(".del-btn").forEach(btn => {
     btn.onclick = async () => {
       savedSites.splice(Number(btn.dataset.idx), 1);
@@ -762,6 +781,10 @@ document.getElementById("swMode").onchange = () => {
   syncSwPills();
   pushSwNow("Stopwatch Mode Updated!");
 };
+["swLeftSafari","swRightSafari","swIcontrolSafari","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.onchange = () => pushSwNow("Stopwatch Setting Saved Live!");
+});
 
 document.querySelectorAll("#cModePills .mpill").forEach(btn => {
   btn.onclick = () => {
@@ -774,8 +797,10 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator Mode Updated!");
 };
-document.getElementById("cAutoOp").onchange = () => pushCalcNow("Hold % Auto-Op Updated!");
-document.getElementById("cHintStyle").onchange = () => pushCalcNow("Hint Style Updated!");
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
+});
 
 document.getElementById("pushSumToCalcBtn").onclick = async () => {
   if (!latestEmSum){
