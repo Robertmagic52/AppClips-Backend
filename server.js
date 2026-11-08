@@ -271,6 +271,7 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.clockOpenSafari === "boolean") state.calc.clockOpenSafari = b.clockOpenSafari;
   if (typeof b.acRedirectUrl === "string") state.calc.acRedirectUrl = b.acRedirectUrl.trim();
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
+  if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
   await saveState();
