@@ -792,7 +792,7 @@ app.get("/", (req, res) => {
     <div class="card">
       <button type="button" id="resetSwModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Stopwatch Modes to Default (Keeps Redirects)</button>
       <div class="mode-pills" id="swModePills">
-        <button type="button" class="mpill" data-mode="seq">Lotto 6-Seq</button>
+        <button type="button" class="mpill sel" data-mode="seq">Lotto 6-Seq</button>
         <button type="button" class="mpill" data-mode="single">Single .XX</button>
         <button type="button" class="mpill" data-mode="open17">Sum = 17</button>
         <button type="button" class="mpill" data-mode="off">Off (Fair)</button>
@@ -800,7 +800,7 @@ app.get("/", (req, res) => {
       <div class="row">
         <label>Force Mode</label>
         <select id="swMode">
-          <option value="seq">Lotto / 6-Number Sequence</option>
+          <option value="seq" selected>Lotto / 6-Number Sequence</option>
           <option value="single">Single Decimal (.00–.99)</option>
           <option value="open17">Digits Add Up to 17</option>
           <option value="off">Off (100% Fair)</option>
@@ -808,7 +808,7 @@ app.get("/", (req, res) => {
       </div>
       <div class="row">
         <label>Single Decimal (.00–.99)</label>
-        <input id="swSingle" type="number" min="0" max="99" style="width:80px;text-align:center;">
+        <input id="swSingle" type="number" min="0" max="99" value="18" style="width:80px;text-align:center;">
       </div>
       <div>
         <div class="row" style="margin-bottom:4px;">
@@ -816,29 +816,29 @@ app.get("/", (req, res) => {
           <button type="button" id="swShuffleBtn" class="chip" style="color:var(--orange);border:1px solid var(--orange);">🔀 Scramble Boxes</button>
         </div>
         <div class="grid6">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="0">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="1">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="2">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="3">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="4">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="5">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="0" value="18">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="1" value="23">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="2" value="27">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="3" value="41">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="4" value="56">
+          <input type="number" min="0" max="99" class="sw-slot" data-i="5" value="9">
         </div>
       </div>
       <div class="row" style="margin-top:12px;">
         <label>Scramble Lotto Order Automatically</label>
-        <input id="swScramble" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
+        <input id="swScramble" type="checkbox" checked style="width:22px;height:22px;accent-color:var(--orange);">
       </div>
       <div class="row">
         <label>Trigger Force On</label>
         <select id="swTrigger">
-          <option value="both">Stop & Lap</option>
+          <option value="both" selected>Stop & Lap</option>
           <option value="stop">Stop Only</option>
           <option value="lap">Lap Only</option>
         </select>
       </div>
       <div class="row">
         <label>Auto-Disarm After Force</label>
-        <input id="swDisarm" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
+        <input id="swDisarm" type="checkbox" checked style="width:22px;height:22px;accent-color:var(--orange);">
       </div>
     </div>
 
@@ -846,27 +846,27 @@ app.get("/", (req, res) => {
     <div class="card">
       <div class="subbox">
         <div class="subhead"><span>1. Left Under Lap / Reset (2x/3x Tap)</span></div>
-        <input id="swLeftUrl" type="text" placeholder="dice or https://...">
+        <input id="swLeftUrl" type="text" value="https://ssw.im/276" placeholder="dice or https://...">
         <div class="chip-row" data-target="swLeftUrl" data-safari="swLeftSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="swLeftSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
+          <input id="swLeftSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
         </div>
       </div>
 
       <div class="subbox">
         <div class="subhead"><span>2. Right Under Start (2x/3x Tap)</span></div>
-        <input id="swRightUrl" type="text" placeholder="https://your-calculator-url.com or dice">
+        <input id="swRightUrl" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://your-calculator-url.com or dice">
         <div class="chip-row" data-target="swRightUrl" data-safari="swRightSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="swRightSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
+          <input id="swRightSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
         </div>
       </div>
 
       <div class="subbox">
         <div class="subhead"><span>3. Top-Right Corner Hold (Calculator)</span></div>
-        <input id="swIcontrolUrl" type="text" placeholder="https://smartcalc-zeta.vercel.app/">
+        <input id="swIcontrolUrl" type="text" value="https://smartcalc-zeta.vercel.app/" placeholder="https://smartcalc-zeta.vercel.app/">
         <div class="chip-row" data-target="swIcontrolUrl" data-safari="swIcontrolSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
@@ -885,7 +885,7 @@ app.get("/", (req, res) => {
       <div class="mode-pills" id="cModePills">
         <button type="button" class="mpill" data-mode="0">Off</button>
         <button type="button" class="mpill" data-mode="1">Fixed</button>
-        <button type="button" class="mpill" data-mode="2">Time +Offset</button>
+        <button type="button" class="mpill sel" data-mode="2">Time +Offset</button>
         <button type="button" class="mpill" data-mode="3">Time Live</button>
       </div>
       <div class="row">
@@ -893,22 +893,22 @@ app.get("/", (req, res) => {
         <select id="cMode">
           <option value="0">Off</option>
           <option value="1">Fixed Number</option>
-          <option value="2">Date + Time (Offset)</option>
+          <option value="2" selected>Date + Time (Offset)</option>
           <option value="3">Date + Time (Live)</option>
         </select>
       </div>
       <div class="row">
         <label>Fixed Force Number</label>
-        <input id="cFixed" type="text" style="width:140px;text-align:right;">
+        <input id="cFixed" type="text" value="6417118" style="width:140px;text-align:right;">
       </div>
       <div class="row">
         <label>Time Offset (Seconds)</label>
-        <input id="cOffset" type="number" style="width:90px;text-align:center;">
+        <input id="cOffset" type="number" value="30" style="width:90px;text-align:center;">
       </div>
       <div class="row">
         <label>Digits Per Press</label>
         <select id="cChunk">
-          <option value="1">1 Digit</option>
+          <option value="1" selected>1 Digit</option>
           <option value="2">2 Digits</option>
           <option value="3">3 Digits</option>
           <option value="4">4 Digits</option>
@@ -917,7 +917,7 @@ app.get("/", (req, res) => {
       </div>
       <div class="row">
         <label>Hold Duration (s)</label>
-        <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" style="width:90px;text-align:center;">
+        <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" value="0.15" style="width:90px;text-align:center;">
       </div>
       <div class="row">
         <label>Auto-type + or − on Lock (Hold .)</label>
@@ -928,7 +928,7 @@ app.get("/", (req, res) => {
         <select id="cHintStyle">
           <option value="both">Bolded Edge + Small Dot</option>
           <option value="dot">Small Dot Only</option>
-          <option value="bright">Bolded Edge Only</option>
+          <option value="bright" selected>Bolded Edge Only</option>
         </select>
       </div>
     </div>
@@ -937,7 +937,7 @@ app.get("/", (req, res) => {
     <div class="card">
       <div class="subbox">
         <div class="subhead"><span>1. Double-Tap Main Numbers / Display Area</span></div>
-        <input id="cClockUrl" type="text" placeholder="https://your-clock-site.com or dice">
+        <input id="cClockUrl" type="text" value="https://stopwatchappclip.vercel.app/" placeholder="https://your-clock-site.com or dice">
         <div class="chip-row" data-target="cClockUrl" data-safari="cClockSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
@@ -947,17 +947,17 @@ app.get("/", (req, res) => {
 
       <div class="subbox">
         <div class="subhead"><span>2. Top-Left Clock Button Tap (iControl)</span></div>
-        <input id="cRedirect" type="text" placeholder="https://icontrol-magic.onrender.com/">
+        <input id="cRedirect" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://icontrol-magic.onrender.com/">
         <div class="chip-row" data-target="cRedirect" data-safari="cRedirectSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab</label>
-          <input id="cRedirectSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
+          <input id="cRedirectSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
         </div>
       </div>
 
       <div class="subbox">
         <div class="subhead"><span>3. Double-Tap AC When Cleared</span></div>
-        <input id="cAcUrl" type="text" placeholder="dice or https://...">
+        <input id="cAcUrl" type="text" value="dice" placeholder="dice or https://...">
         <div class="chip-row" data-target="cAcUrl" data-safari="cAcSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
@@ -1469,7 +1469,7 @@ function renderAiLogs(logs){
   el.textContent = logs.map(l => {
     const time = new Date(l.ts).toLocaleTimeString();
     return "[" + time + '] "' + (l.input || "") + '" -> FORCED: ' + (l.price || 0) + ' (' + (l.source || "") + ')';
-  }).join("\n");
+  }).join(String.fromCharCode(10));
 }
 
 document.getElementById("copyWebhookBtn").onclick = () => {
@@ -1558,7 +1558,7 @@ document.getElementById("pollApiNowBtn").onclick = async () => {
     const res = await fetch("/api/integrations/poll", { method: "POST" });
     const data = await res.json();
     if (data.ok) {
-      flashToast("Polled \"" + data.input + "\" -> Forced: " + data.forceNumber);
+      flashToast("Polled: " + (data.input || "") + " -> Forced: " + (data.forceNumber || ""));
       loadCalc();
       loadIntegrationsConfig();
     } else {
