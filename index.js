@@ -42,6 +42,22 @@ const DEFAULT_CALC_MODES = {
   hintStyle: "bright"
 };
 
+const DEFAULT_INTEGRATIONS = {
+  enabled: true,
+  apiUrl: "",
+  targetField: "data",
+  serpApiKey: "",
+  tavilyApiKey: "",
+  geminiApiKey: "",
+  geminiModel: "gemini-1.5-flash",
+  prompt: "You are a mentalism assistant for a forcing calculator. Given the input item or question, determine the realistic price or numeric value in USD. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words or extra formatting.",
+  lastInput: "",
+  lastOutput: "",
+  lastPrice: 0,
+  lastUpdatedAt: 0,
+  lastLogs: []
+};
+
 const DEFAULT_STATE = {
   savedSites: DEFAULT_SAVED_SITES,
   sitesUpdatedAt: 0,
@@ -67,6 +83,7 @@ const DEFAULT_STATE = {
     icontrolOpenSafari: false,
     updatedAt: 0
   },
+  integrations: DEFAULT_INTEGRATIONS,
   peeks: [],
   emergence: []
 };
@@ -161,6 +178,9 @@ async function initMongo() {
       if (doc.acaat && typeof doc.acaat === "object") {
         state.acaat = { ...DEFAULT_STATE.acaat, ...doc.acaat };
       }
+      if (doc.integrations && typeof doc.integrations === "object") {
+        state.integrations = { ...DEFAULT_INTEGRATIONS, ...doc.integrations };
+      }
       if (Array.isArray(doc.peeks)) state.peeks = doc.peeks.slice(0, 20);
       if (Array.isArray(doc.emergence)) state.emergence = doc.emergence.slice(0, 3);
       console.log("Loaded persistent state from MongoDB! Calc mode:", state.calc.mode, "fixed:", state.calc.fixed);
@@ -185,6 +205,7 @@ function loadState() {
         if (typeof raw.sitesUpdatedAt === "number") state.sitesUpdatedAt = raw.sitesUpdatedAt;
         if (raw.calc) Object.assign(state.calc, raw.calc);
         if (raw.acaat) Object.assign(state.acaat, raw.acaat);
+        if (raw.integrations) Object.assign(state.integrations, raw.integrations);
         if (Array.isArray(raw.peeks)) state.peeks = raw.peeks.slice(0, 20);
         if (Array.isArray(raw.emergence)) state.emergence = raw.emergence.slice(0, 3);
       }
@@ -206,6 +227,7 @@ async function saveState() {
             sitesUpdatedAt: state.sitesUpdatedAt,
             calc: state.calc,
             acaat: state.acaat,
+            integrations: state.integrations,
             peeks: state.peeks,
             emergence: state.emergence
           }
@@ -412,6 +434,271 @@ app.post("/api/acaat/clear-peeks", (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- API & AI Pricing Integrations (/api/webhook, /api/inject, etc.) ---------------- */
+
+function extractField(obj, fieldPath) {
+  if (!obj || typeof obj !== "object") return null;
+  const pathParts = (fieldPath || "data").trim().split(".");
+  let cur = obj;
+  for (const part of pathParts) {
+    if (cur === null || cur === undefined) return null;
+    cur = cur[part];
+  }
+  return cur;
+}
+
+function resolvePayloadInput(body, query, targetField) {
+  let val = extractField(body, targetField);
+  if (val !== null && val !== undefined && String(val).trim()) return String(val).trim();
+
+  val = extractField(query, targetField);
+  if (val !== null && val !== undefined && String(val).trim()) return String(val).trim();
+
+  const fallbacks = ["data", "peek", "query", "text", "item", "input", "q", "value", "search"];
+  for (const f of fallbacks) {
+    if (body && body[f] !== undefined && String(body[f]).trim()) return String(body[f]).trim();
+    if (query && query[f] !== undefined && String(query[f]).trim()) return String(query[f]).trim();
+  }
+
+  if (typeof body === "string" && body.trim()) return body.trim();
+  return null;
+}
+
+async function processAiPricing(rawInput) {
+  if (!rawInput || typeof rawInput !== "string" || !rawInput.trim()) {
+    throw new Error("No input query or item text provided");
+  }
+
+  const query = rawInput.trim();
+  if (!state.integrations) state.integrations = { ...DEFAULT_INTEGRATIONS };
+  const cfg = state.integrations;
+  let searchContext = "";
+  let searchSource = "none";
+
+  // 1. Tavily Search (AI Web Search Engine)
+  if (cfg.tavilyApiKey && cfg.tavilyApiKey.trim()) {
+    try {
+      const tavilyRes = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: cfg.tavilyApiKey.trim(),
+          query: `current price or cost of ${query}`,
+          search_depth: "basic",
+          include_answer: true,
+          max_results: 3
+        })
+      });
+      if (tavilyRes.ok) {
+        const tavilyData = await tavilyRes.json();
+        const snippets = (tavilyData.results || []).map(r => r.content).join("\n");
+        const answer = tavilyData.answer ? `Direct Search Answer: ${tavilyData.answer}\n` : "";
+        searchContext = `${answer}Web Search Results:\n${snippets}`.slice(0, 3000);
+        searchSource = "tavily";
+      }
+    } catch(err) {
+      console.warn("Tavily search error:", err.message);
+    }
+  }
+
+  // 2. SerpAPI Search (Google Shopping / Search fallback)
+  if (!searchContext && cfg.serpApiKey && cfg.serpApiKey.trim()) {
+    try {
+      const serpUrl = `https://serpapi.com/search.json?q=price+of+${encodeURIComponent(query)}&api_key=${encodeURIComponent(cfg.serpApiKey.trim())}`;
+      const serpRes = await fetch(serpUrl);
+      if (serpRes.ok) {
+        const serpData = await serpRes.json();
+        const answerBox = serpData.answer_box ? JSON.stringify(serpData.answer_box) : "";
+        const shopping = (serpData.shopping_results || []).slice(0, 3).map(s => `${s.title}: ${s.price}`).join("; ");
+        const organic = (serpData.organic_results || []).slice(0, 3).map(o => o.snippet).join("\n");
+        searchContext = `Google Shopping: ${shopping}\nAnswer: ${answerBox}\nOrganic:\n${organic}`.slice(0, 3000);
+        searchSource = "serpapi";
+      }
+    } catch(err) {
+      console.warn("SerpAPI search error:", err.message);
+    }
+  }
+
+  let finalNumber = null;
+  let aiSource = searchSource;
+
+  // 3. Gemini API LLM Reasoning
+  if (cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
+    try {
+      const geminiModel = cfg.geminiModel || "gemini-1.5-flash";
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
+
+      const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
+      const userMessage = searchContext
+        ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic price or value in USD. Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
+        : `Item/Query: "${query}"\n\nDetermine the realistic price or estimated retail cost of this item in USD. Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
+
+      const geminiRes = await fetch(geminiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 60
+          }
+        })
+      });
+
+      if (geminiRes.ok) {
+        const geminiData = await geminiRes.json();
+        const candidate = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const digits = candidate.replace(/[^\d]/g, "");
+        if (digits) {
+          finalNumber = parseInt(digits, 10);
+          aiSource = searchSource !== "none" ? `${searchSource}+gemini` : "gemini";
+        }
+      } else {
+        const errText = await geminiRes.text();
+        console.warn("Gemini API error:", errText);
+      }
+    } catch(err) {
+      console.warn("Gemini call exception:", err.message);
+    }
+  }
+
+  // 4. Fallback Regex Extraction if no Gemini response
+  if (finalNumber === null && searchContext) {
+    const match = searchContext.match(/\$\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2})?/);
+    if (match) {
+      finalNumber = parseInt(match[1].replace(/,/g, ""), 10);
+      aiSource = `${searchSource}_regex`;
+    }
+  }
+
+  // 5. Fallback to clean integer from input if input was a number
+  if (finalNumber === null) {
+    const numInput = parseInt(query.replace(/[^\d]/g, ""), 10);
+    if (!isNaN(numInput) && numInput > 0) {
+      finalNumber = numInput;
+      aiSource = "raw_digits";
+    }
+  }
+
+  if (finalNumber === null || isNaN(finalNumber)) {
+    throw new Error(`Could not determine a numeric price for: "${query}"`);
+  }
+
+  // Auto-set SmartCalc fixed force number!
+  state.calc.fixed = String(finalNumber);
+  state.calc.mode = 1;
+  state.calc.updatedAt = Date.now();
+
+  state.integrations.lastInput = query;
+  state.integrations.lastOutput = String(finalNumber);
+  state.integrations.lastPrice = finalNumber;
+  state.integrations.lastUpdatedAt = Date.now();
+
+  const logEntry = {
+    ts: Date.now(),
+    input: query,
+    price: finalNumber,
+    source: aiSource
+  };
+  state.integrations.lastLogs = [logEntry, ...(state.integrations.lastLogs || [])].slice(0, 10);
+
+  await saveState();
+
+  return {
+    success: true,
+    input: query,
+    price: finalNumber,
+    source: aiSource,
+    searchSnippet: searchContext.slice(0, 300)
+  };
+}
+
+// Inbound webhook routes (supports POST and GET)
+app.all(["/api/webhook", "/api/inject"], async (req, res) => {
+  try {
+    const input = resolvePayloadInput(req.body, req.query, state.integrations?.targetField);
+    if (!input) {
+      return res.status(400).json({
+        ok: false,
+        error: `No text found in field '${state.integrations?.targetField || "data"}' or fallback fields`,
+        receivedBody: req.body,
+        receivedQuery: req.query
+      });
+    }
+
+    const result = await processAiPricing(input);
+    res.json({
+      ok: true,
+      input,
+      forceNumber: result.price,
+      source: result.source,
+      calc: state.calc
+    });
+  } catch(err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Outbound API poller endpoint
+app.post("/api/integrations/poll", async (req, res) => {
+  try {
+    const cfg = state.integrations || DEFAULT_INTEGRATIONS;
+    if (!cfg.apiUrl || !cfg.apiUrl.trim()) {
+      return res.status(400).json({ ok: false, error: "No external API URL configured" });
+    }
+
+    const extRes = await fetch(cfg.apiUrl.trim(), { cache: "no-store" });
+    if (!extRes.ok) throw new Error(`External API returned HTTP ${extRes.status}`);
+
+    const extData = await extRes.json();
+    const input = extractField(extData, cfg.targetField) || resolvePayloadInput(extData, null, cfg.targetField);
+    if (!input) throw new Error(`Could not find field '${cfg.targetField}' in external API response`);
+
+    const result = await processAiPricing(String(input));
+    res.json({ ok: true, input, forceNumber: result.price, source: result.source });
+  } catch(err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Integrations config endpoints
+app.get("/api/integrations/config", (req, res) => {
+  res.json({ ok: true, integrations: state.integrations || DEFAULT_INTEGRATIONS });
+});
+
+app.post("/api/integrations/config", async (req, res) => {
+  const b = req.body || {};
+  if (!state.integrations) state.integrations = { ...DEFAULT_INTEGRATIONS };
+
+  if (typeof b.apiUrl === "string") state.integrations.apiUrl = b.apiUrl.trim();
+  if (typeof b.targetField === "string" && b.targetField.trim()) state.integrations.targetField = b.targetField.trim();
+  if (typeof b.serpApiKey === "string") state.integrations.serpApiKey = b.serpApiKey.trim();
+  if (typeof b.tavilyApiKey === "string") state.integrations.tavilyApiKey = b.tavilyApiKey.trim();
+  if (typeof b.geminiApiKey === "string") state.integrations.geminiApiKey = b.geminiApiKey.trim();
+  if (typeof b.geminiModel === "string" && b.geminiModel.trim()) state.integrations.geminiModel = b.geminiModel.trim();
+  if (typeof b.prompt === "string" && b.prompt.trim()) state.integrations.prompt = b.prompt.trim();
+
+  await saveState();
+  res.json({ ok: true, integrations: state.integrations });
+});
+
+// Test AI pipeline
+app.post("/api/integrations/test", async (req, res) => {
+  try {
+    const input = (req.body?.testInput || "").trim();
+    if (!input) return res.status(400).json({ ok: false, error: "Please enter a test item or query" });
+    const result = await processAiPricing(input);
+    res.json({ ok: true, result });
+  } catch(err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /* ---------------- Unified Mobile Control Dashboard (/) ---------------- */
 app.get("/", (req, res) => {
   res.send(`<!DOCTYPE html>
@@ -469,9 +756,10 @@ app.get("/", (req, res) => {
     <button type="button" id="resetAllModesBtn" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border:1px solid rgba(255,159,10,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Reset Modes</button>
     <button type="button" id="resetAllDefaultsBtn" style="background:rgba(48,209,88,0.15);color:#30d158;border:1px solid rgba(48,209,88,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⚡ Reset Everything to Robert's Defaults</button>
   </div>
-  <div class="tabs">
-    <button class="tbtn on" id="tabSw" type="button">⏱ Stopwatch Remote</button>
-    <button class="tbtn" id="tabCalc" type="button">🧮 Calculator Remote</button>
+  <div class="tabs" style="grid-template-columns: repeat(3, 1fr);">
+    <button class="tbtn on" id="tabSw" type="button">⏱ Stopwatch</button>
+    <button class="tbtn" id="tabCalc" type="button">🧮 Calculator</button>
+    <button class="tbtn" id="tabAi" type="button">🤖 AI &amp; Webhooks</button>
   </div>
 
   <!-- STOPWATCH PANE -->
@@ -680,6 +968,95 @@ app.get("/", (req, res) => {
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
 
+  <!-- AI & WEBHOOK INTEGRATIONS PANE -->
+  <div class="pane" id="paneAi">
+    <div class="sec">API &amp; Webhook Integration (Inject / Shortcuts / Custom)</div>
+    <div class="card">
+      <div style="font-size:13px;color:#a1a1a6;margin-bottom:12px;line-height:1.4;">
+        Connect <b>Inject</b>, Apple Shortcuts, WikiTest, or any custom API. Send a text query (e.g. <i>"1968 Gibson Les Paul"</i> or <i>"Rolex Submariner"</i>) and the AI will research the price and arm SmartCalc automatically.
+      </div>
+
+      <div class="subbox">
+        <div class="subhead">
+          <span>Incoming Webhook URL</span>
+          <button type="button" id="copyWebhookBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">Copy URL</button>
+        </div>
+        <input type="text" id="aiWebhookUrl" readonly value="https://smartcalc-backend-el0f.onrender.com/api/webhook" style="font-family:ui-monospace,monospace;font-size:12px;color:#30d158;background:#0d1117;">
+        <div style="font-size:11px;color:#8e8e93;margin-top:5px;">Paste this URL into Inject (Transmitters) or your Apple Shortcut HTTP POST. Also supports <code>/api/inject</code>.</div>
+      </div>
+
+      <div class="subbox">
+        <div class="subhead">Field to Read in Incoming JSON</div>
+        <input type="text" id="aiTargetField" placeholder="data (e.g. data, peek, query)" value="data">
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the item name (defaults to <code>data</code>, with auto-fallback to <code>peek</code>/<code>query</code>).</div>
+      </div>
+
+      <div class="subbox">
+        <div class="subhead">
+          <span>Outbound API URL (Optional Polling)</span>
+          <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#5ac8fa;border:1px solid #5ac8fa;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">Fetch &amp; Run Now</button>
+        </div>
+        <input type="url" id="aiApiUrl" placeholder="https://api.example.com/item">
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional: If you want SmartCalc to fetch data from an external API URL on command.</div>
+      </div>
+    </div>
+
+    <div class="sec">AI &amp; Search API Keys</div>
+    <div class="card">
+      <div class="subbox">
+        <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
+        <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
+        <div class="row" style="margin-top:8px;">
+          <label style="font-size:13px;">Gemini Model</label>
+          <select id="aiGeminiModel" style="font-size:13px;">
+            <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest &amp; Free Tier)</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash (Newest &amp; Fast)</option>
+            <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="subbox">
+        <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
+        <input type="password" id="aiTavilyKey" placeholder="tvly-...">
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+      </div>
+
+      <div class="subbox">
+        <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
+        <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
+      </div>
+    </div>
+
+    <div class="sec">AI Price Estimation Prompt</div>
+    <div class="card">
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
+      <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
+      <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
+    </div>
+
+    <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
+
+    <div class="sec">Live Test Runner &amp; Pipeline Verifier</div>
+    <div class="card">
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Test the full pipeline. Generates the price and arms SmartCalc live:</div>
+      <input type="text" id="aiTestInput" placeholder="e.g. 1968 Gibson Les Paul Custom or Rolex Submariner" value="1968 Gibson Les Paul Custom">
+      <button type="button" class="btn" id="runAiTestBtn" style="margin-top:10px;background:#30d158;color:#000;">⚡ Test AI Pipeline &amp; Force Price</button>
+
+      <div id="aiTestResultBox" style="display:none;margin-top:12px;background:#111c14;border:1px solid #1e4628;border-radius:12px;padding:12px;">
+        <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Resulting Forced Price on SmartCalc</div>
+        <div id="aiResultPrice" style="font-size:28px;font-weight:700;color:#30d158;margin:4px 0;">—</div>
+        <div id="aiResultMeta" style="font-size:12px;color:#a1a1a6;font-family:ui-monospace,monospace;"></div>
+      </div>
+    </div>
+
+    <div class="sec">Recent Integration History</div>
+    <div class="card">
+      <div class="peek-list" id="aiLogList">No incoming requests yet.</div>
+    </div>
+  </div>
+
   <!-- SHARED SAVED WEBSITES MANAGER -->
   <div class="sec">Saved Websites Library (Shared Across Stopwatch & Calculator)</div>
   <div class="card">
@@ -724,18 +1101,17 @@ function syncCalcPills(){
   });
 }
 
-document.getElementById("tabSw").onclick = () => {
-  document.getElementById("tabSw").classList.add("on");
-  document.getElementById("tabCalc").classList.remove("on");
-  document.getElementById("paneSw").classList.add("on");
-  document.getElementById("paneCalc").classList.remove("on");
-};
-document.getElementById("tabCalc").onclick = () => {
-  document.getElementById("tabCalc").classList.add("on");
-  document.getElementById("tabSw").classList.remove("on");
-  document.getElementById("paneCalc").classList.add("on");
-  document.getElementById("paneSw").classList.remove("on");
-};
+function switchTab(t){
+  ["Sw", "Calc", "Ai"].forEach(k => {
+    const btn = document.getElementById("tab" + k);
+    const pane = document.getElementById("pane" + k);
+    if (btn) btn.classList.toggle("on", k === t);
+    if (pane) pane.classList.toggle("on", k === t);
+  });
+}
+document.getElementById("tabSw").onclick = () => switchTab("Sw");
+document.getElementById("tabCalc").onclick = () => switchTab("Calc");
+document.getElementById("tabAi").onclick = () => switchTab("Ai");
 
 function renderSavedSitesUI(){
   document.querySelectorAll(".chip-row").forEach(row => {
@@ -1062,6 +1438,140 @@ document.getElementById("resetAllDefaultsBtn").onclick = async () => {
   await loadCalc();
   flashToast("Everything Reset to Robert's Exact Defaults!");
 };
+
+const DEFAULT_AI_PROMPT = "You are a mentalism assistant for a forcing calculator. Given the input item or question, determine the realistic price or numeric value in USD. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words or extra formatting.";
+
+async function loadIntegrationsConfig(){
+  try {
+    const r = await fetch("/api/integrations/config", { cache: "no-store" });
+    const d = await r.json();
+    if (d && d.integrations){
+      const it = d.integrations;
+      document.getElementById("aiTargetField").value = it.targetField || "data";
+      document.getElementById("aiApiUrl").value = it.apiUrl || "";
+      document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
+      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-1.5-flash";
+      document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
+      document.getElementById("aiSerpKey").value = it.serpApiKey || "";
+      document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
+
+      renderAiLogs(it.lastLogs);
+    }
+  } catch(e){}
+}
+
+function renderAiLogs(logs){
+  const el = document.getElementById("aiLogList");
+  if (!logs || !logs.length){
+    el.textContent = "No webhook requests yet. Paste the Webhook URL into Inject to start!";
+    return;
+  }
+  el.textContent = logs.map(l => {
+    const time = new Date(l.ts).toLocaleTimeString();
+    return "[" + time + '] "' + (l.input || "") + '" -> FORCED: ' + (l.price || 0) + ' (' + (l.source || "") + ')';
+  }).join("\n");
+}
+
+document.getElementById("copyWebhookBtn").onclick = () => {
+  const url = document.getElementById("aiWebhookUrl").value;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => flashToast("Webhook URL Copied!"));
+  } else {
+    document.getElementById("aiWebhookUrl").select();
+    document.execCommand("copy");
+    flashToast("Webhook URL Copied!");
+  }
+};
+
+document.getElementById("resetPromptBtn").onclick = () => {
+  document.getElementById("aiPrompt").value = DEFAULT_AI_PROMPT;
+  flashToast("Prompt Reset to Default!");
+};
+
+document.getElementById("saveAiConfigBtn").onclick = async () => {
+  const body = {
+    targetField: document.getElementById("aiTargetField").value.trim() || "data",
+    apiUrl: document.getElementById("aiApiUrl").value.trim(),
+    geminiApiKey: document.getElementById("aiGeminiKey").value.trim(),
+    geminiModel: document.getElementById("aiGeminiModel").value,
+    tavilyApiKey: document.getElementById("aiTavilyKey").value.trim(),
+    serpApiKey: document.getElementById("aiSerpKey").value.trim(),
+    prompt: document.getElementById("aiPrompt").value.trim() || DEFAULT_AI_PROMPT
+  };
+  try {
+    const res = await fetch("/api/integrations/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      flashToast("AI & API Keys Saved!");
+    } else {
+      flashToast("Error saving config");
+    }
+  } catch(e){
+    flashToast("Save failed");
+  }
+};
+
+document.getElementById("runAiTestBtn").onclick = async () => {
+  const input = document.getElementById("aiTestInput").value.trim();
+  if (!input) {
+    flashToast("Enter an item to test!");
+    return;
+  }
+  const btn = document.getElementById("runAiTestBtn");
+  btn.textContent = "⏳ Researching & Pricing...";
+  btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/integrations/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ testInput: input })
+    });
+    const data = await res.json();
+    if (data.ok && data.result) {
+      const r = data.result;
+      document.getElementById("aiTestResultBox").style.display = "block";
+      document.getElementById("aiResultPrice").textContent = "$" + Number(r.price).toLocaleString();
+      document.getElementById("aiResultMeta").textContent = "Forced on Calc: " + r.price + " | Source: " + r.source;
+      flashToast("SmartCalc Armed with $" + Number(r.price).toLocaleString() + "!");
+      loadCalc();
+      loadIntegrationsConfig();
+    } else {
+      alert("AI Pipeline Error: " + (data.error || "Unknown error"));
+    }
+  } catch(err) {
+    alert("Connection error: " + err.message);
+  } finally {
+    btn.textContent = "⚡ Test AI Pipeline & Force Price";
+    btn.disabled = false;
+  }
+};
+
+document.getElementById("pollApiNowBtn").onclick = async () => {
+  const btn = document.getElementById("pollApiNowBtn");
+  btn.textContent = "Fetching...";
+  try {
+    const res = await fetch("/api/integrations/poll", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      flashToast("Polled \"" + data.input + "\" -> Forced: " + data.forceNumber);
+      loadCalc();
+      loadIntegrationsConfig();
+    } else {
+      alert("Poll Error: " + (data.error || "Failed to poll API"));
+    }
+  } catch(err) {
+    alert("Poll Error: " + err.message);
+  } finally {
+    btn.textContent = "Fetch & Run Now";
+  }
+};
+
+loadIntegrationsConfig();
 </script>
 </body>
 </html>`);
