@@ -29,7 +29,7 @@ const DEFAULT_SW_MODES = {
   targets: [18, 23, 27, 41, 56, 9],
   scrambleLotto: true,
   triggerOn: "both",
-  autoDisarm: false
+  autoDisarm: true
 };
 
 const DEFAULT_CALC_MODES = {
@@ -77,13 +77,44 @@ let StateModel = null;
 if (mongoose) {
   const StateSchema = new mongoose.Schema({
     key: { type: String, default: "global_state", unique: true },
-    savedSites: Array,
-    sitesUpdatedAt: Number,
-    calc: Object,
-    acaat: Object,
-    peeks: Array,
-    emergence: Array
-  }, { timestamps: true });
+    savedSites: { type: Array, default: [] },
+    sitesUpdatedAt: { type: Number, default: 0 },
+    calc: {
+      mode: Number,
+      fixed: String,
+      hold: Number,
+      chunk: Number,
+      offset: Number,
+      autoOpOnLock: Boolean,
+      hintStyle: String,
+      redirectUrl: String,
+      redirectOpenSafari: Boolean,
+      clockSiteUrl: String,
+      clockOpenSafari: Boolean,
+      acRedirectUrl: String,
+      acOpenSafari: Boolean,
+      updatedAt: Number
+    },
+    acaat: {
+      mode: String,
+      singleTarget: Number,
+      targets: Array,
+      scrambleLotto: Boolean,
+      leftRedirectUrl: String,
+      leftOpenSafari: Boolean,
+      rightRedirectUrl: String,
+      rightOpenSafari: Boolean,
+      customSiteUrl: String,
+      openInSafari: Boolean,
+      icontrolUrl: String,
+      icontrolOpenSafari: Boolean,
+      triggerOn: String,
+      autoDisarm: Boolean,
+      updatedAt: Number
+    },
+    peeks: { type: Array, default: [] },
+    emergence: { type: Array, default: [] }
+  }, { timestamps: true, strict: false, minimize: false });
   try {
     StateModel = mongoose.model("State", StateSchema);
   } catch(e) {
@@ -98,23 +129,47 @@ async function initMongo() {
     return;
   }
   try {
-    await mongoose.connect(MONGODB_URI, { bufferCommands: false });
+    if (mongoose.connection) {
+      mongoose.connection.on("disconnected", () => {
+        isMongoConnected = false;
+        console.warn("MongoDB disconnected.");
+      });
+      mongoose.connection.on("reconnected", () => {
+        isMongoConnected = true;
+        console.log("MongoDB reconnected!");
+      });
+      mongoose.connection.on("error", err => {
+        isMongoConnected = false;
+        console.error("MongoDB error:", err.message);
+      });
+    }
+
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 8000,
+      socketTimeoutMS: 45000
+    });
     isMongoConnected = true;
     console.log("MongoDB connected successfully!");
-    const doc = await StateModel.findOne({ key: "global_state" });
+
+    const doc = await StateModel.findOne({ key: "global_state" }).lean();
     if (doc) {
       if (Array.isArray(doc.savedSites) && doc.savedSites.length) state.savedSites = doc.savedSites;
       if (typeof doc.sitesUpdatedAt === "number") state.sitesUpdatedAt = doc.sitesUpdatedAt;
-      if (doc.calc) Object.assign(state.calc, doc.calc);
-      if (doc.acaat) Object.assign(state.acaat, doc.acaat);
+      if (doc.calc && typeof doc.calc === "object") {
+        state.calc = { ...DEFAULT_STATE.calc, ...doc.calc };
+      }
+      if (doc.acaat && typeof doc.acaat === "object") {
+        state.acaat = { ...DEFAULT_STATE.acaat, ...doc.acaat };
+      }
       if (Array.isArray(doc.peeks)) state.peeks = doc.peeks.slice(0, 20);
       if (Array.isArray(doc.emergence)) state.emergence = doc.emergence.slice(0, 3);
-      console.log("Loaded persistent state from MongoDB!");
+      console.log("Loaded persistent state from MongoDB! Calc mode:", state.calc.mode, "fixed:", state.calc.fixed);
     } else {
       await StateModel.create({ key: "global_state", ...state });
       console.log("Seeded default state into MongoDB!");
     }
   } catch(err) {
+    isMongoConnected = false;
     console.error("MongoDB connection failed:", err.message);
   }
 }
@@ -146,14 +201,16 @@ async function saveState() {
       await StateModel.findOneAndUpdate(
         { key: "global_state" },
         {
-          savedSites: state.savedSites,
-          sitesUpdatedAt: state.sitesUpdatedAt,
-          calc: state.calc,
-          acaat: state.acaat,
-          peeks: state.peeks,
-          emergence: state.emergence
+          $set: {
+            savedSites: state.savedSites,
+            sitesUpdatedAt: state.sitesUpdatedAt,
+            calc: state.calc,
+            acaat: state.acaat,
+            peeks: state.peeks,
+            emergence: state.emergence
+          }
         },
-        { upsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true }
       );
     } catch(err) {
       console.error("Error saving state to MongoDB:", err.message);
@@ -199,10 +256,10 @@ app.get("/api/config", (req, res) => {
   res.json({ ...state.calc, savedSites: state.savedSites });
 });
 
-app.post("/api/config", (req, res) => {
+app.post("/api/config", async (req, res) => {
   const b = req.body || {};
   if ([0, 1, 2, 3].includes(Number(b.mode))) state.calc.mode = Number(b.mode);
-  if (typeof b.fixed === "string") state.calc.fixed = b.fixed.replace(/[^\d.-]/g, "");
+  if (b.fixed !== undefined && b.fixed !== null) state.calc.fixed = String(b.fixed).replace(/[^\d.-]/g, "");
   if (!isNaN(Number(b.hold))) state.calc.hold = Math.max(0.15, Math.min(3, Number(b.hold)));
   if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) state.calc.chunk = Number(b.chunk);
   if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
@@ -216,8 +273,8 @@ app.post("/api/config", (req, res) => {
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
-  saveState();
-  res.json({ ok: true, config: { ...state.calc, savedSites: state.savedSites } });
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, config: { ...state.calc, savedSites: state.savedSites } });
 });
 
 /* ---------------- Stopwatch Endpoints (/api/acaat & /api/acaat/peek) ---------------- */
@@ -230,7 +287,7 @@ app.get("/api/acaat", (req, res) => {
   });
 });
 
-app.post("/api/acaat", (req, res) => {
+app.post("/api/acaat", async (req, res) => {
   const b = req.body || {};
   if (["seq", "single", "open17", "off"].includes(b.mode)) state.acaat.mode = b.mode;
   if (b.singleTarget !== undefined && !isNaN(Number(b.singleTarget))) {
@@ -273,8 +330,8 @@ app.post("/api/acaat", (req, res) => {
   if (typeof b.autoDisarm === "boolean") state.acaat.autoDisarm = b.autoDisarm;
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.acaat.updatedAt = Date.now();
-  saveState();
-  res.json({ ok: true, acaat: { ...state.acaat, savedSites: state.savedSites } });
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, acaat: { ...state.acaat, savedSites: state.savedSites } });
 });
 
 app.post("/api/acaat/peek", (req, res) => {
@@ -311,28 +368,40 @@ app.post("/api/acaat/peek", (req, res) => {
 app.get("/healthz", (req, res) => res.json({ status: "ok", now: Date.now() }));
 app.get("/ping", (req, res) => res.send("pong"));
 
-app.post("/api/acaat/reset-mode", (req, res) => {
+app.post("/api/acaat/reset-mode", async (req, res) => {
   Object.assign(state.acaat, DEFAULT_SW_MODES);
   state.acaat.updatedAt = Date.now();
-  saveState();
-  res.json({ ok: true, acaat: { ...state.acaat, savedSites: state.savedSites } });
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, acaat: { ...state.acaat, savedSites: state.savedSites } });
 });
 
-app.post("/api/config/reset-mode", (req, res) => {
+app.post("/api/config/reset-mode", async (req, res) => {
   Object.assign(state.calc, DEFAULT_CALC_MODES);
   state.calc.updatedAt = Date.now();
-  saveState();
-  res.json({ ok: true, config: { ...state.calc, savedSites: state.savedSites } });
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, config: { ...state.calc, savedSites: state.savedSites } });
 });
 
-app.post("/api/reset-all-modes", (req, res) => {
+app.post("/api/reset-all-modes", async (req, res) => {
   Object.assign(state.acaat, DEFAULT_SW_MODES);
   Object.assign(state.calc, DEFAULT_CALC_MODES);
   const now = Date.now();
   state.acaat.updatedAt = now;
   state.calc.updatedAt = now;
-  saveState();
-  res.json({ ok: true, acaat: state.acaat, calc: state.calc, savedSites: state.savedSites });
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, acaat: state.acaat, calc: state.calc, savedSites: state.savedSites });
+});
+
+app.post("/api/reset-all-defaults", async (req, res) => {
+  state.calc = JSON.parse(JSON.stringify(DEFAULT_STATE.calc));
+  state.acaat = JSON.parse(JSON.stringify(DEFAULT_STATE.acaat));
+  state.savedSites = JSON.parse(JSON.stringify(DEFAULT_SAVED_SITES));
+  const now = Date.now();
+  state.calc.updatedAt = now;
+  state.acaat.updatedAt = now;
+  state.sitesUpdatedAt = now;
+  await saveState();
+  res.json({ ok: true, mongoSaved: isMongoConnected, message: "Reset to Robert's exact defaults!", acaat: state.acaat, calc: state.calc, savedSites: state.savedSites });
 });
 
 app.post("/api/acaat/clear-peeks", (req, res) => {
@@ -395,8 +464,9 @@ app.get("/", (req, res) => {
 </head>
 <body>
 <div class="wrap">
-  <div style="text-align:center;margin-bottom:12px;">
-    <button type="button" id="resetAllModesBtn" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border:1px solid rgba(255,159,10,0.4);border-radius:999px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">↺ Reset All Modes to Default (Keeps All Redirects)</button>
+  <div style="text-align:center;margin-bottom:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+    <button type="button" id="resetAllModesBtn" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border:1px solid rgba(255,159,10,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Reset Modes</button>
+    <button type="button" id="resetAllDefaultsBtn" style="background:rgba(48,209,88,0.15);color:#30d158;border:1px solid rgba(48,209,88,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⚡ Reset Everything to Robert's Defaults</button>
   </div>
   <div class="tabs">
     <button class="tbtn on" id="tabSw" type="button">⏱ Stopwatch Remote</button>
@@ -609,7 +679,7 @@ app.get("/", (req, res) => {
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
 
-  <!-- SHARED SAVED WEBSITES LIBRARY -->
+  <!-- SHARED SAVED WEBSITES MANAGER -->
   <div class="sec">Saved Websites Library (Shared Across Stopwatch & Calculator)</div>
   <div class="card">
     <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;">
@@ -620,7 +690,7 @@ app.get("/", (req, res) => {
       <label>Default to New Safari Tab when picked</label>
       <input id="newSiteSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
     </div>
-    <button type="button" id="addSiteBtn" style="width:100%;margin-top:8px;background:#2c2c2e;color:var(--orange);border:1px solid var(--orange);border-radius:999px;padding:9px;font-weight:700;cursor:pointer;">+ Save Website to Library</button>
+    <button type="button" id="addSiteBtn" style="width:100%;margin-top:8px;background:#2c2c2e;color:var(--orange);border:1px solid var(--orange);border-radius:9px;padding:9px;font-weight:700;cursor:pointer;">+ Save Website to Library</button>
     <div id="savedSitesContainer" style="margin-top:12px;"></div>
   </div>
 </div>
@@ -670,12 +740,12 @@ function renderSavedSitesUI(){
   document.querySelectorAll(".chip-row").forEach(row => {
     const targetId = row.dataset.target;
     const safariId = row.dataset.safari;
-    let html = `<button type="button" class="chip dice" data-url="dice" data-saf="0">🎲 Dice Roller</button>`;
+    let html = \`<button type="button" class="chip dice" data-url="dice" data-saf="0">🎲 Dice Roller</button>\`;
     savedSites.forEach(s => {
       if (s.url.toLowerCase() === "dice") return;
       const safeName = (s.name || s.url).replace(/</g, "&lt;");
       const safeUrl = s.url.replace(/"/g, "&quot;");
-      html += `<button type="button" class="chip" data-url="${safeUrl}" data-saf="${s.openInSafari ? 1 : 0}">${safeName}</button>`;
+      html += \`<button type="button" class="chip" data-url="\${safeUrl}" data-saf="\${s.openInSafari ? 1 : 0}">\${safeName}</button>\`;
     });
     row.innerHTML = html;
     row.querySelectorAll(".chip").forEach(btn => {
@@ -693,19 +763,19 @@ function renderSavedSitesUI(){
 
   const box = document.getElementById("savedSitesContainer");
   if (!savedSites.length){
-    box.innerHTML = `<div style="color:#8e8e93;font-size:13px;">No saved websites yet.</div>`;
+    box.innerHTML = \`<div style="color:#8e8e93;font-size:13px;">No saved websites yet.</div>\`;
     return;
   }
-  box.innerHTML = savedSites.map((s, idx) => `
+  box.innerHTML = savedSites.map((s, idx) => \`
     <div class="site-row">
       <div class="site-meta">
-        <div class="site-title">${(s.name || s.url).replace(/</g, "&lt;")}</div>
-        <div class="site-sub">${s.url.replace(/</g, "&lt;")}</div>
+        <div class="site-title">\${(s.name || s.url).replace(/</g, "&lt;")}</div>
+        <div class="site-sub">\${s.url.replace(/</g, "&lt;")}</div>
       </div>
-      <button type="button" class="chip mode-tog-btn" data-idx="${idx}" style="color:#ff9f0a;">${s.openInSafari ? "Safari Tab" : "App Clip"}</button>
-      <button type="button" class="del-btn" data-idx="${idx}">Delete</button>
+      <button type="button" class="chip mode-tog-btn" data-idx="\${idx}" style="color:#ff9f0a;">\${s.openInSafari ? "Safari Tab" : "App Clip"}</button>
+      <button type="button" class="del-btn" data-idx="\${idx}">Delete</button>
     </div>
-  `).join("");
+  \`).join("");
   box.querySelectorAll(".mode-tog-btn").forEach(btn => {
     btn.onclick = async () => {
       const idx = Number(btn.dataset.idx);
@@ -780,11 +850,11 @@ async function loadSw(onlyPeeks){
       document.getElementById("swScramble").checked = !!d.scrambleLotto;
       document.getElementById("swTrigger").value = d.triggerOn || "both";
       document.getElementById("swDisarm").checked = !!d.autoDisarm;
-      document.getElementById("swLeftUrl").value = d.leftRedirectUrl || "https://ssw.im/276";
+      document.getElementById("swLeftUrl").value = d.leftRedirectUrl || "dice";
       document.getElementById("swLeftSafari").checked = !!d.leftOpenSafari;
-      document.getElementById("swRightUrl").value = d.rightRedirectUrl || d.customSiteUrl || "https://icontrol-magic.onrender.com/";
+      document.getElementById("swRightUrl").value = d.rightRedirectUrl || d.customSiteUrl || "";
       document.getElementById("swRightSafari").checked = !!(d.rightOpenSafari ?? d.openInSafari);
-      document.getElementById("swIcontrolUrl").value = d.icontrolUrl || "https://smartcalc-zeta.vercel.app/";
+      document.getElementById("swIcontrolUrl").value = d.icontrolUrl || "https://icontrol-magic.onrender.com/";
       document.getElementById("swIcontrolSafari").checked = (d.icontrolOpenSafari !== false);
       renderSavedSitesUI();
     }
@@ -793,7 +863,7 @@ async function loadSw(onlyPeeks){
       const sum = em.reduce((acc, it) => acc + (Number(it.largeInt) || 0), 0);
       latestEmSum = sum;
       document.getElementById("emSum").textContent = String(sum);
-      document.getElementById("emSlots").textContent = em.map((it, idx) => `#${idx+1}: ${it.formatted} (${it.largeInt})`).join("  •  ");
+      document.getElementById("emSlots").textContent = em.map((it, idx) => \`#\${idx+1}: \${it.formatted} (\${it.largeInt})\`).join("  •  ");
     } else {
       latestEmSum = 0;
       document.getElementById("emSum").textContent = "—";
@@ -803,11 +873,11 @@ async function loadSw(onlyPeeks){
     if (peeks.length){
       const latest = peeks[0];
       document.getElementById("liveShown").textContent = latest.shownFormatted;
-      document.getElementById("liveInt").textContent = `Number: ${latest.largeInt ?? ""}`;
-      document.getElementById("liveBreakdown").textContent = `Sec: ${latest.sec ?? 0} | Dec: .${p2(latest.cs ?? 0)}`;
+      document.getElementById("liveInt").textContent = \`Number: \${latest.largeInt ?? ""}\`;
+      document.getElementById("liveBreakdown").textContent = \`Sec: \${latest.sec ?? 0} | Dec: .\${p2(latest.cs ?? 0)}\`;
       document.getElementById("peekLog").textContent = peeks.map(
-        p => `[${p.at}] ${p.type}: ${p.shownFormatted} (${p.largeInt ?? ""})`
-      ).join("\n");
+        p => \`[\${p.at}] \${p.type}: \${p.shownFormatted} (\${p.largeInt ?? ""})\`
+      ).join("\\n");
     } else {
       document.getElementById("liveShown").textContent = "—";
       document.getElementById("liveInt").textContent = "Number: —";
@@ -824,13 +894,13 @@ async function loadCalc(){
     if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
     document.getElementById("cMode").value = String(d.mode ?? 2);
     syncCalcPills();
-    document.getElementById("cFixed").value = d.fixed || "6417118";
-    document.getElementById("cOffset").value = d.offset ?? 30;
+    document.getElementById("cFixed").value = d.fixed || "";
+    document.getElementById("cOffset").value = d.offset ?? 60;
     document.getElementById("cChunk").value = String(d.chunk ?? 1);
-    document.getElementById("cHold").value = d.hold ?? 0.15;
+    document.getElementById("cHold").value = d.hold ?? 0.5;
     document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
-    document.getElementById("cHintStyle").value = d.hintStyle || "bright";
-    document.getElementById("cClockUrl").value = d.clockSiteUrl || "https://stopwatchappclip.vercel.app/";
+    document.getElementById("cHintStyle").value = d.hintStyle || "both";
+    document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
     document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
     document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
     document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
@@ -857,11 +927,11 @@ async function pushSwNow(toastText){
     scrambleLotto: document.getElementById("swScramble").checked,
     triggerOn: document.getElementById("swTrigger").value,
     autoDisarm: document.getElementById("swDisarm").checked,
-    leftRedirectUrl: document.getElementById("swLeftUrl").value.trim() || "https://ssw.im/276",
+    leftRedirectUrl: document.getElementById("swLeftUrl").value.trim() || "dice",
     leftOpenSafari: document.getElementById("swLeftSafari").checked,
-    rightRedirectUrl: document.getElementById("swRightUrl").value.trim() || "https://icontrol-magic.onrender.com/",
+    rightRedirectUrl: document.getElementById("swRightUrl").value.trim(),
     rightOpenSafari: document.getElementById("swRightSafari").checked,
-    icontrolUrl: document.getElementById("swIcontrolUrl").value.trim() || "https://smartcalc-zeta.vercel.app/",
+    icontrolUrl: document.getElementById("swIcontrolUrl").value.trim() || "https://icontrol-magic.onrender.com/",
     icontrolOpenSafari: document.getElementById("swIcontrolSafari").checked,
     savedSites
   };
@@ -882,9 +952,9 @@ async function pushCalcNow(toastText){
     hold: Number(document.getElementById("cHold").value),
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
-    clockSiteUrl: document.getElementById("cClockUrl").value.trim() || "https://stopwatchappclip.vercel.app/",
+    clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
     clockOpenSafari: document.getElementById("cClockSafari").checked,
-    redirectUrl: document.getElementById("cRedirect").value.trim() || "https://icontrol-magic.onrender.com/",
+    redirectUrl: document.getElementById("cRedirect").value.trim(),
     redirectOpenSafari: document.getElementById("cRedirectSafari").checked,
     acRedirectUrl: document.getElementById("cAcUrl").value.trim() || "dice",
     acOpenSafari: document.getElementById("cAcSafari").checked,
@@ -981,6 +1051,15 @@ document.getElementById("resetAllModesBtn").onclick = async () => {
   await loadSw(false);
   await loadCalc();
   flashToast("All Modes Reset (Redirects Kept)!");
+};
+
+document.getElementById("resetAllDefaultsBtn").onclick = async () => {
+  if (!confirm("Reset ALL settings for Calculator and Stopwatch to Robert's exact defaults?")) return;
+  swLoaded = false;
+  await fetch("/api/reset-all-defaults", { method: "POST" });
+  await loadSw(false);
+  await loadCalc();
+  flashToast("Everything Reset to Robert's Exact Defaults!");
 };
 </script>
 </body>
