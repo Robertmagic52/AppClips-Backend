@@ -17,10 +17,10 @@ app.use(express.json());
 
 const DEFAULT_SAVED_SITES = [
   { name: "Built-in 3D Dice Roller", url: "dice", openInSafari: false },
-  { name: "SSW Target", url: "https://ssw.im/276", openInSafari: true },
+  { name: "Stopwatch", url: "https://stopwatchappclip.vercel.app/", openInSafari: false },
+  { name: "Calculator", url: "https://smartcalc-zeta.vercel.app/", openInSafari: false },
   { name: "iControl", url: "https://icontrol-magic.onrender.com/", openInSafari: true },
-  { name: "Stopwatch", url: "https://smartcalc-backend-el0f.onrender.com/acaat.html", openInSafari: false },
-  { name: "Calculator", url: "https://smartcalc-backend-el0f.onrender.com/index.html", openInSafari: false }
+  { name: "SSW Target", url: "https://ssw.im/276", openInSafari: true }
 ];
 
 const DEFAULT_SW_MODES = {
@@ -49,7 +49,7 @@ const DEFAULT_STATE = {
     ...DEFAULT_CALC_MODES,
     redirectUrl: "https://icontrol-magic.onrender.com/",
     redirectOpenSafari: true,
-    clockSiteUrl: "https://smartcalc-backend-el0f.onrender.com/acaat.html",
+    clockSiteUrl: "https://stopwatchappclip.vercel.app/",
     clockOpenSafari: false,
     acRedirectUrl: "dice",
     acOpenSafari: false,
@@ -63,7 +63,7 @@ const DEFAULT_STATE = {
     rightOpenSafari: true,
     customSiteUrl: "https://icontrol-magic.onrender.com/",
     openInSafari: true,
-    icontrolUrl: "https://smartcalc-backend-el0f.onrender.com/index.html",
+    icontrolUrl: "https://smartcalc-zeta.vercel.app/",
     icontrolOpenSafari: false,
     updatedAt: 0
   },
@@ -507,7 +507,7 @@ app.get("/", (req, res) => {
 
       <div class="subbox">
         <div class="subhead"><span>3. Top-Right Corner Hold (Calculator)</span></div>
-        <input id="swIcontrolUrl" type="text" placeholder="https://smartcalc-backend-el0f.onrender.com/index.html">
+        <input id="swIcontrolUrl" type="text" placeholder="https://smartcalc-zeta.vercel.app/">
         <div class="chip-row" data-target="swIcontrolUrl" data-safari="swIcontrolSafari"></div>
         <div class="row" style="margin-top:8px;">
           <label>Open in New Safari Tab (unchecked = App Clip)</label>
@@ -561,7 +561,7 @@ app.get("/", (req, res) => {
         <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" style="width:90px;text-align:center;">
       </div>
       <div class="row">
-        <label>Auto-type + or − on Hold %</label>
+        <label>Auto-type + or − on Lock (Hold .)</label>
         <input id="cAutoOp" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
       </div>
       <div class="row">
@@ -609,7 +609,7 @@ app.get("/", (req, res) => {
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
 
-  <!-- SHARED SAVED WEBSITES MANAGER -->
+  <!-- SHARED SAVED WEBSITES LIBRARY -->
   <div class="sec">Saved Websites Library (Shared Across Stopwatch & Calculator)</div>
   <div class="card">
     <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;">
@@ -620,7 +620,7 @@ app.get("/", (req, res) => {
       <label>Default to New Safari Tab when picked</label>
       <input id="newSiteSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
     </div>
-    <button type="button" id="addSiteBtn" style="width:100%;margin-top:8px;background:#2c2c2e;color:var(--orange);border:1px solid var(--orange);border-radius:9px;padding:9px;font-weight:700;cursor:pointer;">+ Save Website to Library</button>
+    <button type="button" id="addSiteBtn" style="width:100%;margin-top:8px;background:#2c2c2e;color:var(--orange);border:1px solid var(--orange);border-radius:999px;padding:9px;font-weight:700;cursor:pointer;">+ Save Website to Library</button>
     <div id="savedSitesContainer" style="margin-top:12px;"></div>
   </div>
 </div>
@@ -780,11 +780,11 @@ async function loadSw(onlyPeeks){
       document.getElementById("swScramble").checked = !!d.scrambleLotto;
       document.getElementById("swTrigger").value = d.triggerOn || "both";
       document.getElementById("swDisarm").checked = !!d.autoDisarm;
-      document.getElementById("swLeftUrl").value = d.leftRedirectUrl || "dice";
+      document.getElementById("swLeftUrl").value = d.leftRedirectUrl || "https://ssw.im/276";
       document.getElementById("swLeftSafari").checked = !!d.leftOpenSafari;
-      document.getElementById("swRightUrl").value = d.rightRedirectUrl || d.customSiteUrl || "";
+      document.getElementById("swRightUrl").value = d.rightRedirectUrl || d.customSiteUrl || "https://icontrol-magic.onrender.com/";
       document.getElementById("swRightSafari").checked = !!(d.rightOpenSafari ?? d.openInSafari);
-      document.getElementById("swIcontrolUrl").value = d.icontrolUrl || "https://icontrol-magic.onrender.com/";
+      document.getElementById("swIcontrolUrl").value = d.icontrolUrl || "https://smartcalc-zeta.vercel.app/";
       document.getElementById("swIcontrolSafari").checked = (d.icontrolOpenSafari !== false);
       renderSavedSitesUI();
     }
@@ -824,13 +824,13 @@ async function loadCalc(){
     if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
     document.getElementById("cMode").value = String(d.mode ?? 2);
     syncCalcPills();
-    document.getElementById("cFixed").value = d.fixed || "";
-    document.getElementById("cOffset").value = d.offset ?? 60;
+    document.getElementById("cFixed").value = d.fixed || "6417118";
+    document.getElementById("cOffset").value = d.offset ?? 30;
     document.getElementById("cChunk").value = String(d.chunk ?? 1);
-    document.getElementById("cHold").value = d.hold ?? 0.5;
+    document.getElementById("cHold").value = d.hold ?? 0.15;
     document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
-    document.getElementById("cHintStyle").value = d.hintStyle || "both";
-    document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
+    document.getElementById("cHintStyle").value = d.hintStyle || "bright";
+    document.getElementById("cClockUrl").value = d.clockSiteUrl || "https://stopwatchappclip.vercel.app/";
     document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
     document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
     document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
@@ -857,11 +857,11 @@ async function pushSwNow(toastText){
     scrambleLotto: document.getElementById("swScramble").checked,
     triggerOn: document.getElementById("swTrigger").value,
     autoDisarm: document.getElementById("swDisarm").checked,
-    leftRedirectUrl: document.getElementById("swLeftUrl").value.trim() || "dice",
+    leftRedirectUrl: document.getElementById("swLeftUrl").value.trim() || "https://ssw.im/276",
     leftOpenSafari: document.getElementById("swLeftSafari").checked,
-    rightRedirectUrl: document.getElementById("swRightUrl").value.trim(),
+    rightRedirectUrl: document.getElementById("swRightUrl").value.trim() || "https://icontrol-magic.onrender.com/",
     rightOpenSafari: document.getElementById("swRightSafari").checked,
-    icontrolUrl: document.getElementById("swIcontrolUrl").value.trim() || "https://icontrol-magic.onrender.com/",
+    icontrolUrl: document.getElementById("swIcontrolUrl").value.trim() || "https://smartcalc-zeta.vercel.app/",
     icontrolOpenSafari: document.getElementById("swIcontrolSafari").checked,
     savedSites
   };
@@ -882,9 +882,9 @@ async function pushCalcNow(toastText){
     hold: Number(document.getElementById("cHold").value),
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
-    clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
+    clockSiteUrl: document.getElementById("cClockUrl").value.trim() || "https://stopwatchappclip.vercel.app/",
     clockOpenSafari: document.getElementById("cClockSafari").checked,
-    redirectUrl: document.getElementById("cRedirect").value.trim(),
+    redirectUrl: document.getElementById("cRedirect").value.trim() || "https://icontrol-magic.onrender.com/",
     redirectOpenSafari: document.getElementById("cRedirectSafari").checked,
     acRedirectUrl: document.getElementById("cAcUrl").value.trim() || "dice",
     acOpenSafari: document.getElementById("cAcSafari").checked,
