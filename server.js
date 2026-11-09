@@ -479,6 +479,22 @@ app.post("/api/calc/heartbeat", (req, res) => {
   } else {
     lastCalcHeartbeatAt = now;
   }
+  if (req.body?.daysAlive && req.body.daysAlive.date) {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.daysAlive = {
+      date: String(req.body.daysAlive.date || ""),
+      dayOfWeek: String(req.body.daysAlive.dayOfWeek || ""),
+      daysAlive: Number(req.body.daysAlive.daysAlive) || 0,
+      starSign: String(req.body.daysAlive.starSign || ""),
+      starSymbol: String(req.body.daysAlive.starSymbol || ""),
+      at: req.body.daysAlive.at || new Date().toLocaleTimeString()
+    };
+    state.calc.updatedAt = now;
+  }
+  if (req.body?.battery !== undefined) {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.battery = Number(req.body.battery);
+  }
   const spectatorConnected = (now - lastCalcHeartbeatAt) < 5500;
   const controllerConnected = (now - lastControllerHeartbeatAt) < 5500;
   res.json({
@@ -1398,6 +1414,9 @@ app.get("/", (req, res) => {
       <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
         <div style="font-size:10px;font-weight:700;color:#ff9f0a;text-transform:uppercase;margin-bottom:6px;">🎮 Remote Control Keypad (Click to type on spectator screen)</div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
+          <button type="button" class="rkey" data-k="lock" style="grid-column: span 2; padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM (LOCK)</button>
+          <button type="button" class="rkey" data-k="unlock" style="grid-column: span 2; padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
+
           <button type="button" class="rkey" data-k="back" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">⌫</button>
           <button type="button" class="rkey" data-k="clear" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">AC</button>
           <button type="button" class="rkey" data-k="pct" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">%</button>
