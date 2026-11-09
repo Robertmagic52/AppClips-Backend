@@ -56,6 +56,8 @@ const DEFAULT_CALC_MODES = {
     date: "",
     dayOfWeek: "",
     daysAlive: 0,
+    starSign: "",
+    starSymbol: "",
     at: ""
   },
   timeFormat: "12"
@@ -326,7 +328,7 @@ app.post("/api/config", async (req, res) => {
   if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) state.calc.chunk = Number(b.chunk);
   if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
   if (typeof b.autoOpOnLock === "boolean") state.calc.autoOpOnLock = b.autoOpOnLock;
-  if (["both", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
+  if (["both", "top", "old", "none", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
   if (typeof b.redirectUrl === "string") state.calc.redirectUrl = b.redirectUrl.trim();
   if (typeof b.redirectOpenSafari === "boolean") state.calc.redirectOpenSafari = b.redirectOpenSafari;
   if (typeof b.clockSiteUrl === "string") state.calc.clockSiteUrl = b.clockSiteUrl.trim();
@@ -453,6 +455,8 @@ app.post("/api/acaat/peek", (req, res) => {
       date: String(b.date || "").trim(),
       dayOfWeek: String(b.dayOfWeek || "").trim(),
       daysAlive: Number(b.daysAlive) || 0,
+      starSign: String(b.starSign || "").trim(),
+      starSymbol: String(b.starSymbol || "").trim(),
       at: entry.at
     };
     state.calc.updatedAt = Date.now();
@@ -501,11 +505,17 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     };
   }
   const b = req.body || {};
-  state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
-  state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
-  state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
-  state.calc.mirror.updatedAt = Date.now();
-  lastCalcHeartbeatAt = Date.now();
+  if (b.fromController) {
+    state.calc.mirror.controllerKey = { key: String(b.key || ""), seq: Number(b.seq) || Date.now() };
+    state.calc.mirror.updatedAt = Date.now();
+    lastControllerHeartbeatAt = Date.now();
+  } else {
+    state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
+    state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
+    state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
+    state.calc.mirror.updatedAt = Date.now();
+    lastCalcHeartbeatAt = Date.now();
+  }
   res.json({ ok: true, mirror: state.calc.mirror });
 });
 
@@ -1384,6 +1394,37 @@ app.get("/", (req, res) => {
         <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
       </div>
 
+      <!-- REMOTE KEYPAD: TRANSMIT KEYSTROKES TO SPECTATOR SCREEN -->
+      <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
+        <div style="font-size:10px;font-weight:700;color:#ff9f0a;text-transform:uppercase;margin-bottom:6px;">🎮 Remote Control Keypad (Click to type on spectator screen)</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
+          <button type="button" class="rkey" data-k="back" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">⌫</button>
+          <button type="button" class="rkey" data-k="clear" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">AC</button>
+          <button type="button" class="rkey" data-k="pct" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">%</button>
+          <button type="button" class="rkey" data-k="div" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">÷</button>
+
+          <button type="button" class="rkey" data-k="d7" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">7</button>
+          <button type="button" class="rkey" data-k="d8" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">8</button>
+          <button type="button" class="rkey" data-k="d9" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">9</button>
+          <button type="button" class="rkey" data-k="mul" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">×</button>
+
+          <button type="button" class="rkey" data-k="d4" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">4</button>
+          <button type="button" class="rkey" data-k="d5" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">5</button>
+          <button type="button" class="rkey" data-k="d6" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">6</button>
+          <button type="button" class="rkey" data-k="sub" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">−</button>
+
+          <button type="button" class="rkey" data-k="d1" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">1</button>
+          <button type="button" class="rkey" data-k="d2" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">2</button>
+          <button type="button" class="rkey" data-k="d3" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">3</button>
+          <button type="button" class="rkey" data-k="add" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">+</button>
+
+          <button type="button" class="rkey" data-k="sign" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">±</button>
+          <button type="button" class="rkey" data-k="d0" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">0</button>
+          <button type="button" class="rkey" data-k="dot" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">.</button>
+          <button type="button" class="rkey" data-k="eq" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">=</button>
+        </div>
+      </div>
+
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #2c2c2e;">
         <span id="mirrorLastKeyDisp" style="font-size:11px;color:#8e8e93;font-family:ui-monospace,monospace;">Last Key: None</span>
         <span id="mirrorLastSeen" style="font-size:11px;color:#636366;">Heartbeat: Waiting</span>
@@ -1401,8 +1442,11 @@ app.get("/", (req, res) => {
 
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Day of Week Born</div>
-          <div id="daysAliveDow" style="font-size:28px;font-weight:900;color:#30d158;letter-spacing:0.02em;line-height:1.1;margin-top:2px;">—</div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Day of Week Born &amp; Star Sign</div>
+          <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px;">
+            <div id="daysAliveDow" style="font-size:28px;font-weight:900;color:#30d158;letter-spacing:0.02em;line-height:1.1;">—</div>
+            <div id="daysAliveZodiac" style="font-size:18px;font-weight:700;color:#ffd60a;"></div>
+          </div>
           <div id="daysAliveDate" style="font-size:14px;color:#fff;font-weight:600;margin-top:4px;">No birthday entered yet</div>
           <div id="daysAliveMeta" style="font-size:11px;color:#636366;margin-top:2px;">(Spectator types Month × Day × Year)</div>
         </div>
@@ -1474,11 +1518,12 @@ app.get("/", (req, res) => {
         <input id="cAutoOp" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
       </div>
       <div class="row">
-        <label>Hint Digit Style</label>
+        <label>Covert Hint Style</label>
         <select id="cHintStyle">
-          <option value="both">Bolded Edge + Small Dot</option>
-          <option value="dot">Small Dot Only</option>
-          <option value="bright" selected>Bolded Edge Only</option>
+          <option value="both" selected>Both (Top Bar + Keypad)</option>
+          <option value="top">Top Bar Only (Time Colon + Battery Last Digit)</option>
+          <option value="old">Old Keypad Only (Key Outlines &amp; Dots)</option>
+          <option value="none">Off (No Covert Hints)</option>
         </select>
       </div>
     </div>
@@ -2010,6 +2055,10 @@ async function loadCalc(onlyMirror){
         daDow.textContent = (da.dayOfWeek || "Unknown").toUpperCase();
         daDow.style.color = "#30d158";
       }
+      if (da.starSign) {
+        const daZodiac = document.getElementById("daysAliveZodiac");
+        if (daZodiac) daZodiac.textContent = "⭐ " + da.starSign + " " + (da.starSymbol || "");
+      }
       const dayIdx = (da.dayOfWeek === "Sunday") ? 7 : (["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].indexOf(da.dayOfWeek) + 1);
       if (daMeta) daMeta.textContent = "Day Key: " + da.dayOfWeek + " (Key " + dayIdx + ")";
       if (daNum) daNum.textContent = Number(da.daysAlive || 0).toLocaleString() + " Days";
@@ -2043,6 +2092,20 @@ if (togMirBtn) {
     } catch(e) {}
   };
 }
+
+document.querySelectorAll("#dashboardRemoteKeypad .rkey").forEach(b => {
+  b.onclick = async () => {
+    const k = b.dataset.k;
+    try {
+      await fetch("/api/calc/mirror/keystroke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromController: true, key: k, seq: Date.now() })
+      });
+      flashToast("Sent key: " + k);
+    } catch(e) {}
+  };
+});
 
 document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
   b.onclick = async () => {
