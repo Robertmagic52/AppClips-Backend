@@ -484,12 +484,15 @@ app.post("/api/calc/heartbeat", (req, res) => {
   }
   if (req.body?.daysAlive && req.body.daysAlive.date) {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    const sec = String(req.body.daysAlive.secretNum || req.body.daysAlive.secretNumber || state.calc.daysAlive?.secretNum || "");
     state.calc.daysAlive = {
       date: String(req.body.daysAlive.date || ""),
       dayOfWeek: String(req.body.daysAlive.dayOfWeek || ""),
       daysAlive: Number(req.body.daysAlive.daysAlive) || 0,
       starSign: String(req.body.daysAlive.starSign || ""),
       starSymbol: String(req.body.daysAlive.starSymbol || ""),
+      secretNum: sec,
+      secretNumber: sec,
       at: req.body.daysAlive.at || new Date().toLocaleTimeString()
     };
     state.calc.updatedAt = now;
@@ -538,6 +541,19 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
     if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
     if (b.hint !== undefined) state.calc.mirror.hint = String(b.hint || "");
+    if (b.secretNum) {
+      if (!state.calc.daysAlive) state.calc.daysAlive = {};
+      state.calc.daysAlive.secretNum = String(b.secretNum);
+      state.calc.daysAlive.secretNumber = String(b.secretNum);
+    }
+    if (b.daysAlive && b.daysAlive.date) {
+      state.calc.daysAlive = {
+        ...state.calc.daysAlive,
+        ...b.daysAlive,
+        secretNum: String(b.daysAlive.secretNum || b.secretNum || state.calc.daysAlive?.secretNum || ""),
+        secretNumber: String(b.daysAlive.secretNumber || b.secretNum || state.calc.daysAlive?.secretNum || "")
+      };
+    }
     state.calc.mirror.updatedAt = Date.now();
     lastCalcHeartbeatAt = Date.now();
   }
