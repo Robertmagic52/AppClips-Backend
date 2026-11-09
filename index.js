@@ -482,7 +482,9 @@ app.post("/api/calc/heartbeat", (req, res) => {
     now,
     spectatorConnected,
     controllerConnected,
-    mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "" }
+    mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "" },
+    daysAlive: state.calc?.daysAlive || {},
+    timeFormat: state.calc?.timeFormat || "12"
   });
 });
 
