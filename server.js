@@ -340,6 +340,9 @@ app.post("/api/config", async (req, res) => {
     if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
     if (typeof b.mirror.direction === "string") state.calc.mirror.direction = b.mirror.direction;
   }
+  if (b.clearBirthday || b.resetBirthday) {
+    state.calc.daysAlive = {};
+  }
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
@@ -569,6 +572,14 @@ app.post("/api/calc/force-days-alive", async (req, res) => {
     state.calc.updatedAt = Date.now();
     await saveState();
   }
+  res.json({ ok: true, calc: state.calc });
+});
+
+app.post("/api/calc/reset-bday", async (req, res) => {
+  if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+  state.calc.daysAlive = {};
+  state.calc.updatedAt = Date.now();
+  await saveState();
   res.json({ ok: true, calc: state.calc });
 });
 
