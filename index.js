@@ -525,14 +525,18 @@ async function processAiPricing(rawInput) {
     aiSource = "direct_number";
   }
 
+  const tavilyKey = (process.env.TAVILY_API_KEY || cfg.tavilyApiKey || "").trim();
+  const serpApiKey = (process.env.SERPAPI_API_KEY || cfg.serpApiKey || "").trim();
+  const geminiKey = (process.env.GEMINI_API_KEY || cfg.geminiApiKey || "").trim();
+
   // 1. Tavily Search (AI Web Search Engine)
-  if (finalNumber === null && cfg.tavilyApiKey && cfg.tavilyApiKey.trim()) {
+  if (finalNumber === null && tavilyKey) {
     try {
       const tavilyRes = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          api_key: cfg.tavilyApiKey.trim(),
+          api_key: tavilyKey,
           query: `retail price of single ${query} in USD`,
           search_depth: "basic",
           include_answer: true,
@@ -552,9 +556,9 @@ async function processAiPricing(rawInput) {
   }
 
   // 2. SerpAPI Search (Google Shopping / Search fallback)
-  if (!searchContext && cfg.serpApiKey && cfg.serpApiKey.trim()) {
+  if (!searchContext && serpApiKey) {
     try {
-      const serpUrl = `https://serpapi.com/search.json?q=retail+price+of+single+${encodeURIComponent(query)}+in+USD&api_key=${encodeURIComponent(cfg.serpApiKey.trim())}`;
+      const serpUrl = `https://serpapi.com/search.json?q=retail+price+of+single+${encodeURIComponent(query)}+in+USD&api_key=${encodeURIComponent(serpApiKey)}`;
       const serpRes = await fetch(serpUrl);
       if (serpRes.ok) {
         const serpData = await serpRes.json();
@@ -572,7 +576,7 @@ async function processAiPricing(rawInput) {
   if (finalNumber === null && searchSource !== "none") aiSource = searchSource;
 
   // 3. Gemini API LLM Reasoning
-  if (finalNumber === null && cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
+  if (finalNumber === null && geminiKey) {
     const candidateModels = [
       cfg.geminiModel,
       "gemini-3.5-flash",
@@ -582,47 +586,59 @@ async function processAiPricing(rawInput) {
     ].filter(Boolean);
     const uniqueModels = [...new Set(candidateModels)];
 
+    const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
+    const userMessage = searchContext
+      ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
+      : `Item/Query: "${query}"\n\nDetermine the realistic, typical retail price in USD for ONE single unit of this item (do NOT price a bulk multi-pack, case, or carton). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
+
     for (const model of uniqueModels) {
       if (finalNumber !== null) break;
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
-        const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
-        const userMessage = searchContext
-          ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
-          : `Item/Query: "${query}"\n\nDetermine the realistic, typical retail price in USD for ONE single unit of this item (do NOT price a bulk multi-pack, case, or carton). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
-
-        const geminiRes = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
-              }
-            ],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 60
-            }
-          })
-        });
-
-        if (geminiRes.ok) {
-          const geminiData = await geminiRes.json();
-          const candidate = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          const digits = candidate.replace(/[^\d]/g, "");
-          if (digits) {
-            finalNumber = parseInt(digits, 10);
-            aiSource = searchSource !== "none" ? `${searchSource}+gemini(${model})` : `gemini(${model})`;
-            break;
+      for (const withBudget of [true, false]) {
+        if (finalNumber !== null) break;
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+          const genConfig = {
+            temperature: 0.1,
+            maxOutputTokens: 1000
+          };
+          if (withBudget) {
+            genConfig.thinkingConfig = { thinkingBudget: 0 };
           }
-        } else {
-          const errText = await geminiRes.text();
-          console.warn(`Gemini (${model}) error:`, errText);
+
+          const geminiRes = await fetch(geminiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
+                }
+              ],
+              generationConfig: genConfig
+            })
+          });
+
+          if (geminiRes.ok) {
+            const geminiData = await geminiRes.json();
+            const candObj = geminiData.candidates?.[0];
+            // Discard if prematurely cut off by MAX_TOKENS to avoid truncated digits
+            if (candObj && candObj.finishReason !== "MAX_TOKENS") {
+              const partText = candObj.content?.parts?.find(p => p.text)?.text || "";
+              const digits = partText.replace(/[^\d]/g, "");
+              if (digits) {
+                finalNumber = parseInt(digits, 10);
+                aiSource = searchSource !== "none" ? `${searchSource}+gemini(${model})` : `gemini(${model})`;
+                break;
+              }
+            }
+          } else {
+            const errText = await geminiRes.text();
+            console.warn(`Gemini (${model}, budget=${withBudget}) error:`, errText);
+          }
+        } catch(err) {
+          console.warn(`Gemini (${model}, budget=${withBudget}) exception:`, err.message);
         }
-      } catch(err) {
-        console.warn(`Gemini (${model}) exception:`, err.message);
       }
     }
   }
@@ -647,7 +663,7 @@ async function processAiPricing(rawInput) {
   }
 
   if (finalNumber === null || isNaN(finalNumber)) {
-    if (!cfg.geminiApiKey && !cfg.tavilyApiKey && !cfg.serpApiKey) {
+    if (!geminiKey && !tavilyKey && !serpApiKey) {
       throw new Error(`Please paste your Gemini API Key in the AI section below so SmartCalc can price "${query}"`);
     }
     throw new Error(`Could not determine a numeric price for: "${query}"`);
@@ -777,9 +793,36 @@ app.post("/api/integrations/poll", async (req, res) => {
   }
 });
 
+function maskSecret(str) {
+  if (!str || typeof str !== "string") return "";
+  const t = str.trim();
+  if (!t) return "";
+  if (t.length <= 8) return "••••••••";
+  return t.slice(0, 4) + "••••••••" + t.slice(-4);
+}
+
 // Integrations config endpoints
 app.get("/api/integrations/config", (req, res) => {
-  res.json({ ok: true, integrations: state.integrations || DEFAULT_INTEGRATIONS });
+  const it = state.integrations || DEFAULT_INTEGRATIONS;
+  const gemini = (process.env.GEMINI_API_KEY || it.geminiApiKey || "").trim();
+  const tavily = (process.env.TAVILY_API_KEY || it.tavilyApiKey || "").trim();
+  const serp = (process.env.SERPAPI_API_KEY || it.serpApiKey || "").trim();
+
+  res.json({
+    ok: true,
+    integrations: {
+      ...it,
+      geminiApiKey: maskSecret(gemini),
+      tavilyApiKey: maskSecret(tavily),
+      serpApiKey: maskSecret(serp),
+      hasGeminiKey: !!gemini,
+      hasTavilyKey: !!tavily,
+      hasSerpKey: !!serp,
+      isEnvGemini: !!process.env.GEMINI_API_KEY,
+      isEnvTavily: !!process.env.TAVILY_API_KEY,
+      isEnvSerp: !!process.env.SERPAPI_API_KEY
+    }
+  });
 });
 
 app.post("/api/integrations/config", async (req, res) => {
@@ -789,9 +832,17 @@ app.post("/api/integrations/config", async (req, res) => {
   if (typeof b.apiUrl === "string") state.integrations.apiUrl = b.apiUrl.trim();
   if (typeof b.autoPoll === "boolean") state.integrations.autoPoll = b.autoPoll;
   if (typeof b.targetField === "string" && b.targetField.trim()) state.integrations.targetField = b.targetField.trim();
-  if (typeof b.serpApiKey === "string") state.integrations.serpApiKey = b.serpApiKey.trim();
-  if (typeof b.tavilyApiKey === "string") state.integrations.tavilyApiKey = b.tavilyApiKey.trim();
-  if (typeof b.geminiApiKey === "string") state.integrations.geminiApiKey = b.geminiApiKey.trim();
+
+  // Only update keys if non-empty and not masked with bullet dots
+  if (typeof b.serpApiKey === "string" && b.serpApiKey.trim() && !b.serpApiKey.includes("••••")) {
+    state.integrations.serpApiKey = b.serpApiKey.trim();
+  }
+  if (typeof b.tavilyApiKey === "string" && b.tavilyApiKey.trim() && !b.tavilyApiKey.includes("••••")) {
+    state.integrations.tavilyApiKey = b.tavilyApiKey.trim();
+  }
+  if (typeof b.geminiApiKey === "string" && b.geminiApiKey.trim() && !b.geminiApiKey.includes("••••")) {
+    state.integrations.geminiApiKey = b.geminiApiKey.trim();
+  }
   if (typeof b.geminiModel === "string" && b.geminiModel.trim()) state.integrations.geminiModel = b.geminiModel.trim();
   if (typeof b.prompt === "string" && b.prompt.trim()) state.integrations.prompt = b.prompt.trim();
 
@@ -1617,7 +1668,7 @@ async function loadIntegrationsConfig(){
       if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
       document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
-      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-1.5-flash";
+      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-3.5-flash";
       document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
       document.getElementById("aiSerpKey").value = it.serpApiKey || "";
       document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
@@ -1714,16 +1765,22 @@ document.getElementById("resetPromptBtn").onclick = () => {
 };
 
 document.getElementById("saveAiConfigBtn").onclick = async () => {
+  const gemVal = document.getElementById("aiGeminiKey").value.trim();
+  const tavVal = document.getElementById("aiTavilyKey").value.trim();
+  const serpVal = document.getElementById("aiSerpKey").value.trim();
+
   const body = {
     apiUrl: document.getElementById("aiApiUrl").value.trim(),
     autoPoll: true,
     targetField: document.getElementById("aiTargetField").value.trim() || "data",
-    geminiApiKey: document.getElementById("aiGeminiKey").value.trim(),
     geminiModel: document.getElementById("aiGeminiModel").value,
-    tavilyApiKey: document.getElementById("aiTavilyKey").value.trim(),
-    serpApiKey: document.getElementById("aiSerpKey").value.trim(),
     prompt: document.getElementById("aiPrompt").value.trim() || DEFAULT_AI_PROMPT
   };
+
+  if (gemVal && !gemVal.includes("••••")) body.geminiApiKey = gemVal;
+  if (tavVal && !tavVal.includes("••••")) body.tavilyApiKey = tavVal;
+  if (serpVal && !serpVal.includes("••••")) body.serpApiKey = serpVal;
+
   try {
     const res = await fetch("/api/integrations/config", {
       method: "POST",
@@ -1733,6 +1790,7 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
     const data = await res.json();
     if (data.ok) {
       flashToast("Inject API & AI Keys Saved!");
+      loadIntegrationsConfig();
     } else {
       flashToast("Error saving config");
     }
