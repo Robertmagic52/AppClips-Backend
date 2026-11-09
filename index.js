@@ -46,14 +46,14 @@ const DEFAULT_CALC_MODES = {
 
 const DEFAULT_INTEGRATIONS = {
   enabled: true,
-  autoPoll: false,
+  autoPoll: true,
   apiUrl: "",
   targetField: "data",
   serpApiKey: "",
   tavilyApiKey: "",
   geminiApiKey: "",
-  geminiModel: "gemini-1.5-flash",
-  prompt: "You are a mentalism assistant for a forcing calculator. Given the input item or question, determine the realistic price or numeric value in USD. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words or extra formatting.",
+  geminiModel: "gemini-3.5-flash",
+  prompt: "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.",
   lastInput: "",
   lastOutput: "",
   lastPrice: 0,
@@ -183,6 +183,9 @@ async function initMongo() {
       }
       if (doc.integrations && typeof doc.integrations === "object") {
         state.integrations = { ...DEFAULT_INTEGRATIONS, ...doc.integrations };
+        if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
+          state.integrations.geminiModel = "gemini-3.5-flash";
+        }
       }
       if (Array.isArray(doc.peeks)) state.peeks = doc.peeks.slice(0, 20);
       if (Array.isArray(doc.emergence)) state.emergence = doc.emergence.slice(0, 3);
@@ -208,7 +211,12 @@ function loadState() {
         if (typeof raw.sitesUpdatedAt === "number") state.sitesUpdatedAt = raw.sitesUpdatedAt;
         if (raw.calc) Object.assign(state.calc, raw.calc);
         if (raw.acaat) Object.assign(state.acaat, raw.acaat);
-        if (raw.integrations) Object.assign(state.integrations, raw.integrations);
+        if (raw.integrations) {
+          Object.assign(state.integrations, raw.integrations);
+          if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
+            state.integrations.geminiModel = "gemini-3.5-flash";
+          }
+        }
         if (Array.isArray(raw.peeks)) state.peeks = raw.peeks.slice(0, 20);
         if (Array.isArray(raw.emergence)) state.emergence = raw.emergence.slice(0, 3);
       }
@@ -525,7 +533,7 @@ async function processAiPricing(rawInput) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           api_key: cfg.tavilyApiKey.trim(),
-          query: `current price or cost of ${query}`,
+          query: `retail price of single ${query} in USD`,
           search_depth: "basic",
           include_answer: true,
           max_results: 3
@@ -546,7 +554,7 @@ async function processAiPricing(rawInput) {
   // 2. SerpAPI Search (Google Shopping / Search fallback)
   if (!searchContext && cfg.serpApiKey && cfg.serpApiKey.trim()) {
     try {
-      const serpUrl = `https://serpapi.com/search.json?q=price+of+${encodeURIComponent(query)}&api_key=${encodeURIComponent(cfg.serpApiKey.trim())}`;
+      const serpUrl = `https://serpapi.com/search.json?q=retail+price+of+single+${encodeURIComponent(query)}+in+USD&api_key=${encodeURIComponent(cfg.serpApiKey.trim())}`;
       const serpRes = await fetch(serpUrl);
       if (serpRes.ok) {
         const serpData = await serpRes.json();
@@ -565,55 +573,67 @@ async function processAiPricing(rawInput) {
 
   // 3. Gemini API LLM Reasoning
   if (finalNumber === null && cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
-    try {
-      const geminiModel = cfg.geminiModel || "gemini-1.5-flash";
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
+    const candidateModels = [
+      cfg.geminiModel,
+      "gemini-3.5-flash",
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest"
+    ].filter(Boolean);
+    const uniqueModels = [...new Set(candidateModels)];
 
-      const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
-      const userMessage = searchContext
-        ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic price or value in USD. Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
-        : `Item/Query: "${query}"\n\nDetermine the realistic price or estimated retail cost of this item in USD. Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
+    for (const model of uniqueModels) {
+      if (finalNumber !== null) break;
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
+        const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
+        const userMessage = searchContext
+          ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
+          : `Item/Query: "${query}"\n\nDetermine the realistic, typical retail price in USD for ONE single unit of this item (do NOT price a bulk multi-pack, case, or carton). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
 
-      const geminiRes = await fetch(geminiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
+        const geminiRes = await fetch(geminiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 60
             }
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 60
-          }
-        })
-      });
+          })
+        });
 
-      if (geminiRes.ok) {
-        const geminiData = await geminiRes.json();
-        const candidate = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        const digits = candidate.replace(/[^\d]/g, "");
-        if (digits) {
-          finalNumber = parseInt(digits, 10);
-          aiSource = searchSource !== "none" ? `${searchSource}+gemini` : "gemini";
+        if (geminiRes.ok) {
+          const geminiData = await geminiRes.json();
+          const candidate = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          const digits = candidate.replace(/[^\d]/g, "");
+          if (digits) {
+            finalNumber = parseInt(digits, 10);
+            aiSource = searchSource !== "none" ? `${searchSource}+gemini(${model})` : `gemini(${model})`;
+            break;
+          }
+        } else {
+          const errText = await geminiRes.text();
+          console.warn(`Gemini (${model}) error:`, errText);
         }
-      } else {
-        const errText = await geminiRes.text();
-        console.warn("Gemini API error:", errText);
+      } catch(err) {
+        console.warn(`Gemini (${model}) exception:`, err.message);
       }
-    } catch(err) {
-      console.warn("Gemini call exception:", err.message);
     }
   }
 
-  // 4. Fallback Regex Extraction if no Gemini response
+  // 4. Fallback Regex Extraction ONLY as an emergency if Gemini was unavailable
   if (finalNumber === null && searchContext) {
-    const match = searchContext.match(/\$\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2})?/);
-    if (match) {
-      finalNumber = parseInt(match[1].replace(/,/g, ""), 10);
-      aiSource = `${searchSource}_regex`;
+    const singleMatch = searchContext.match(/(?:single\s+(?:deck|pack|unit|item)|each|\/deck|per\s+(?:deck|pack|unit))\s*(?:is|at|for|:)?\s*\$\s*(\d{1,3}(?:,\d{3})*|\d+)/i)
+      || searchContext.match(/\$\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2})?\s*(?:each|per\s+(?:deck|unit|item))/i);
+    if (singleMatch) {
+      finalNumber = parseInt(singleMatch[1].replace(/,/g, ""), 10);
+      aiSource = `${searchSource}_single_regex`;
     }
   }
 
@@ -1158,9 +1178,10 @@ app.get("/", (req, res) => {
         <div class="row" style="margin-top:8px;">
           <label style="font-size:13px;">Gemini Model</label>
           <select id="aiGeminiModel" style="font-size:13px;">
-            <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest &amp; Free Tier)</option>
-            <option value="gemini-2.0-flash">gemini-2.0-flash (Newest &amp; Fast)</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning)</option>
+            <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
+            <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
+            <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
+            <option value="gemini-flash-latest">gemini-flash-latest</option>
           </select>
         </div>
       </div>
@@ -1583,7 +1604,7 @@ document.getElementById("resetAllDefaultsBtn").onclick = async () => {
   flashToast("Everything Reset to Robert's Exact Defaults!");
 };
 
-const DEFAULT_AI_PROMPT = "You are a mentalism assistant for a forcing calculator. Given the input item or question, determine the realistic price or numeric value in USD. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words or extra formatting.";
+const DEFAULT_AI_PROMPT = "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.";
 
 async function loadIntegrationsConfig(){
   try {
