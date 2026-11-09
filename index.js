@@ -483,22 +483,29 @@ app.post("/api/calc/heartbeat", (req, res) => {
     lastCalcHeartbeatAt = now;
   }
   if (req.body?.resetBday) {
-    if (state.calc) state.calc.daysAlive = {};
+    if (state.calc) {
+      state.calc.daysAlive = {};
+      state.calc.bdayResetAt = now;
+      state.calc.updatedAt = now;
+    }
     saveState().catch(() => {});
   } else if (req.body?.daysAlive && req.body.daysAlive.date) {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
-    const sec = String(req.body.daysAlive.secretNum || req.body.daysAlive.secretNumber || state.calc.daysAlive?.secretNum || "");
-    state.calc.daysAlive = {
-      date: String(req.body.daysAlive.date || ""),
-      dayOfWeek: String(req.body.daysAlive.dayOfWeek || ""),
-      daysAlive: Number(req.body.daysAlive.daysAlive) || 0,
-      starSign: String(req.body.daysAlive.starSign || ""),
-      starSymbol: String(req.body.daysAlive.starSymbol || ""),
-      secretNum: sec,
-      secretNumber: sec,
-      at: req.body.daysAlive.at || new Date().toLocaleTimeString()
-    };
-    state.calc.updatedAt = now;
+    const isSuppressed = state.calc.bdayResetAt && (now - state.calc.bdayResetAt < 25000);
+    if (!isSuppressed) {
+      const sec = String(req.body.daysAlive.secretNum || req.body.daysAlive.secretNumber || state.calc.daysAlive?.secretNum || "");
+      state.calc.daysAlive = {
+        date: String(req.body.daysAlive.date || ""),
+        dayOfWeek: String(req.body.daysAlive.dayOfWeek || ""),
+        daysAlive: Number(req.body.daysAlive.daysAlive) || 0,
+        starSign: String(req.body.daysAlive.starSign || ""),
+        starSymbol: String(req.body.daysAlive.starSymbol || ""),
+        secretNum: sec,
+        secretNumber: sec,
+        at: req.body.daysAlive.at || new Date().toLocaleTimeString()
+      };
+      state.calc.updatedAt = now;
+    }
   }
   if (req.body?.battery !== undefined) {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
@@ -513,6 +520,7 @@ app.post("/api/calc/heartbeat", (req, res) => {
     controllerConnected,
     mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "" },
     daysAlive: state.calc?.daysAlive || {},
+    bdayResetAt: state.calc?.bdayResetAt || 0,
     timeFormat: state.calc?.timeFormat || "12"
   });
 });
@@ -624,6 +632,7 @@ app.post("/api/calc/force-days-alive", async (req, res) => {
 app.post("/api/calc/reset-bday", async (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   state.calc.daysAlive = {};
+  state.calc.bdayResetAt = Date.now();
   if (state.calc.mirror) {
     state.calc.mirror.display = "0";
     state.calc.mirror.expr = "";
@@ -631,7 +640,7 @@ app.post("/api/calc/reset-bday", async (req, res) => {
   state.calc.mode = 2; // Default to Time mode!
   state.calc.updatedAt = Date.now();
   await saveState().catch(() => {});
-  res.json({ ok: true, calc: state.calc, daysAlive: {} });
+  res.json({ ok: true, calc: state.calc, daysAlive: {}, bdayResetAt: state.calc.bdayResetAt });
 });
 
 app.post("/api/acaat/reset-emergence", async (req, res) => {
