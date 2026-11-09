@@ -55,7 +55,7 @@ const DEFAULT_INTEGRATIONS = {
   serpApiKey: "",
   tavilyApiKey: "",
   geminiApiKey: "",
-  geminiModel: "gemini-3.5-flash",
+  geminiModel: "gemini-2.5-flash",
   prompt: "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.",
   lastInput: "",
   lastOutput: "",
@@ -135,6 +135,7 @@ if (mongoose) {
       autoDisarm: Boolean,
       updatedAt: Number
     },
+    integrations: { type: Object, default: {} },
     peeks: { type: Array, default: [] },
     emergence: { type: Array, default: [] }
   }, { timestamps: true, strict: false, minimize: false });
@@ -187,12 +188,12 @@ async function initMongo() {
       if (doc.integrations && typeof doc.integrations === "object") {
         state.integrations = { ...DEFAULT_INTEGRATIONS, ...doc.integrations };
         if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
-        if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
-          state.integrations.geminiModel = "gemini-3.5-flash";
+        if (!state.integrations.geminiModel) {
+          state.integrations.geminiModel = "gemini-2.5-flash";
         }
       }
       if (Array.isArray(doc.peeks)) state.peeks = doc.peeks.slice(0, 20);
-      if (Array.isArray(doc.emergence)) state.emergence = doc.emergence.slice(0, 3);
+      if (Array.isArray(doc.emergence)) state.emergence = doc.emergence.slice(0, 10);
       console.log("Loaded persistent state from MongoDB! Calc mode:", state.calc.mode, "fixed:", state.calc.fixed);
     } else {
       await StateModel.create({ key: "global_state", ...state });
@@ -218,12 +219,12 @@ function loadState() {
         if (raw.integrations) {
           Object.assign(state.integrations, raw.integrations);
           if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
-          if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
-            state.integrations.geminiModel = "gemini-3.5-flash";
+          if (!state.integrations.geminiModel) {
+            state.integrations.geminiModel = "gemini-2.5-flash";
           }
         }
         if (Array.isArray(raw.peeks)) state.peeks = raw.peeks.slice(0, 20);
-        if (Array.isArray(raw.emergence)) state.emergence = raw.emergence.slice(0, 3);
+        if (Array.isArray(raw.emergence)) state.emergence = raw.emergence.slice(0, 10);
       }
     }
   } catch (e) {}
@@ -395,22 +396,30 @@ app.post("/api/acaat/peek", (req, res) => {
     at: b.at || new Date().toLocaleTimeString()
   };
   if (entry.type.startsWith("RESET") || entry.type.startsWith("EMERGENCE")) {
-    if (Array.isArray(b.emergenceList) && b.emergenceList.length > 0) {
-      state.emergence = b.emergenceList.map(it => ({
-        formatted: String(it.formatted || "").replace(/\s*\(.*$/, "").trim(),
-        largeInt: Number(it.largeInt) || parseInt(String(it.formatted || "").replace(/[^0-9]/g, ""), 10) || 0
-      }));
+    const targetCount = state.acaat?.emergenceCount || 3;
+    if (!Array.isArray(state.emergence)) state.emergence = [];
+
+    // Option A Locking: If already reached targetCount, round is complete and locked against extra resets
+    if (state.emergence.length >= targetCount) {
+      // Locked! Extra resets will not overwrite or reset the completed round
     } else {
-      const rawSlots = String(b.emergenceSlots || b.realFormatted || shownFmt);
-      const parts = rawSlots.split(/[—–-]/).map(s => s.trim()).filter(Boolean);
-      if (parts.length > 0) {
-        state.emergence = parts.map(fmt => {
-          const cleanFmt = fmt.replace(/\s*\(.*$/, "").trim();
-          return {
-            formatted: cleanFmt,
-            largeInt: parseInt(cleanFmt.replace(/[^0-9]/g, ""), 10) || 0
-          };
-        });
+      if (Array.isArray(b.emergenceList) && b.emergenceList.length > state.emergence.length) {
+        // Client has a fuller list (up to targetCount)
+        state.emergence = b.emergenceList.slice(0, targetCount).map(it => ({
+          formatted: String(it.formatted || "").replace(/\s*\(.*$/, "").trim(),
+          largeInt: Number(it.largeInt) || parseInt(String(it.formatted || "").replace(/[^0-9]/g, ""), 10) || 0
+        }));
+      } else {
+        // Client sent a single reset slot or client refreshed/had cached state:
+        // Append this reset as the next spectator's slot!
+        const nextItem = {
+          formatted: shownFmt,
+          largeInt: largeInt
+        };
+        const last = state.emergence[state.emergence.length - 1];
+        if (!last || last.formatted !== nextItem.formatted || last.largeInt !== nextItem.largeInt) {
+          state.emergence.push(nextItem);
+        }
       }
     }
   }
@@ -533,7 +542,7 @@ function resolvePayloadInput(body, query, targetField) {
   return null;
 }
 
-async function processAiPricing(rawInput) {
+async function processAiPricing(rawInput, overrides = {}) {
   if (!rawInput || typeof rawInput !== "string" || !rawInput.trim()) {
     throw new Error("No input query or item text provided");
   }
@@ -553,9 +562,14 @@ async function processAiPricing(rawInput) {
     aiSource = "direct_number";
   }
 
-  const tavilyKey = (process.env.TAVILY_API_KEY || cfg.tavilyApiKey || "").trim();
-  const serpApiKey = (process.env.SERPAPI_API_KEY || cfg.serpApiKey || "").trim();
-  const geminiKey = (process.env.GEMINI_API_KEY || cfg.geminiApiKey || "").trim();
+  const tavilyKey = (overrides.tavilyApiKey || process.env.TAVILY_API_KEY || cfg.tavilyApiKey || "").trim();
+  const serpApiKey = (overrides.serpApiKey || process.env.SERPAPI_API_KEY || cfg.serpApiKey || "").trim();
+  const geminiKey = (overrides.geminiApiKey || process.env.GEMINI_API_KEY || cfg.geminiApiKey || "").trim();
+
+  // If valid keys were passed via overrides and server state has none, auto-persist to state
+  if (overrides.geminiApiKey && !cfg.geminiApiKey) { cfg.geminiApiKey = overrides.geminiApiKey; saveState(); }
+  if (overrides.tavilyApiKey && !cfg.tavilyApiKey) { cfg.tavilyApiKey = overrides.tavilyApiKey; saveState(); }
+  if (overrides.serpApiKey && !cfg.serpApiKey) { cfg.serpApiKey = overrides.serpApiKey; saveState(); }
 
   // 1. Tavily Search (AI Web Search Engine)
   if (finalNumber === null && tavilyKey) {
@@ -607,10 +621,12 @@ async function processAiPricing(rawInput) {
   if (finalNumber === null && geminiKey) {
     const candidateModels = [
       cfg.geminiModel,
-      "gemini-3.5-flash",
-      "gemini-3.8-flash",
-      "gemini-3.5-flash-lite",
-      "gemini-flash-latest"
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-1.5-pro"
     ].filter(Boolean);
     const uniqueModels = [...new Set(candidateModels)];
 
@@ -931,7 +947,17 @@ app.post("/api/integrations/test", async (req, res) => {
   try {
     const input = (req.body?.testInput || "").trim();
     if (!input) return res.status(400).json({ ok: false, error: "Please enter a test item or query" });
-    const result = await processAiPricing(input);
+    const overrides = {};
+    if (typeof req.body?.geminiApiKey === "string" && req.body.geminiApiKey.trim() && !req.body.geminiApiKey.includes("••••")) {
+      overrides.geminiApiKey = req.body.geminiApiKey.trim();
+    }
+    if (typeof req.body?.tavilyApiKey === "string" && req.body.tavilyApiKey.trim() && !req.body.tavilyApiKey.includes("••••")) {
+      overrides.tavilyApiKey = req.body.tavilyApiKey.trim();
+    }
+    if (typeof req.body?.serpApiKey === "string" && req.body.serpApiKey.trim() && !req.body.serpApiKey.includes("••••")) {
+      overrides.serpApiKey = req.body.serpApiKey.trim();
+    }
+    const result = await processAiPricing(input, overrides);
     res.json({ ok: true, result });
   } catch(err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -1357,10 +1383,11 @@ app.get("/", (req, res) => {
           <div class="row" style="margin-top:8px;">
             <label style="font-size:13px;">Gemini Model</label>
             <select id="aiGeminiModel" style="font-size:13px;">
-              <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
-              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
-              <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
-              <option value="gemini-flash-latest">gemini-flash-latest</option>
+              <option value="gemini-2.5-flash" selected>gemini-2.5-flash (Fast &amp; Accurate - Recommended)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (Ultra-fast)</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash (Standard Flash)</option>
+              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite (Cost-effective)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (Deep Reasoning)</option>
             </select>
           </div>
         </div>
@@ -1968,14 +1995,17 @@ async function loadIntegrationsConfig(){
       const ap = document.getElementById("aiAutoPoll");
       if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
-      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-3.5-flash";
+      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-2.5-flash";
       document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
 
       if (!it.isLocked) {
         updateLockUI(true);
-        document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
-        document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
-        document.getElementById("aiSerpKey").value = it.serpApiKey || "";
+        const lGem = localStorage.getItem("smartcalc_gemini_key") || "";
+        const lTav = localStorage.getItem("smartcalc_tavily_key") || "";
+        const lSerp = localStorage.getItem("smartcalc_serp_key") || "";
+        document.getElementById("aiGeminiKey").value = it.geminiApiKey || lGem || "";
+        document.getElementById("aiTavilyKey").value = it.tavilyApiKey || lTav || "";
+        document.getElementById("aiSerpKey").value = it.serpApiKey || lSerp || "";
       } else {
         updateLockUI(false);
       }
@@ -2078,6 +2108,10 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
   const newPinVal = (document.getElementById("aiNewPin").value || "").trim();
   const pinToSend = currentSessionPin || "6417";
 
+  if (gemVal && !gemVal.includes("••••")) localStorage.setItem("smartcalc_gemini_key", gemVal);
+  if (tavVal && !tavVal.includes("••••")) localStorage.setItem("smartcalc_tavily_key", tavVal);
+  if (serpVal && !serpVal.includes("••••")) localStorage.setItem("smartcalc_serp_key", serpVal);
+
   const body = {
     pin: pinToSend,
     apiUrl: document.getElementById("aiApiUrl").value.trim(),
@@ -2127,11 +2161,20 @@ document.getElementById("runAiTestBtn").onclick = async () => {
   btn.textContent = "⏳ Researching & Pricing...";
   btn.disabled = true;
 
+  const gemVal = (document.getElementById("aiGeminiKey")?.value || "").trim() || localStorage.getItem("smartcalc_gemini_key") || "";
+  const tavVal = (document.getElementById("aiTavilyKey")?.value || "").trim() || localStorage.getItem("smartcalc_tavily_key") || "";
+  const serpVal = (document.getElementById("aiSerpKey")?.value || "").trim() || localStorage.getItem("smartcalc_serp_key") || "";
+
   try {
+    const payload = { testInput: input };
+    if (gemVal && !gemVal.includes("••••")) payload.geminiApiKey = gemVal;
+    if (tavVal && !tavVal.includes("••••")) payload.tavilyApiKey = tavVal;
+    if (serpVal && !serpVal.includes("••••")) payload.serpApiKey = serpVal;
+
     const res = await fetch("/api/integrations/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ testInput: input })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (data.ok && data.result) {
