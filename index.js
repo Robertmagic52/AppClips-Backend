@@ -289,7 +289,12 @@ app.post("/api/sites", (req, res) => {
 
 /* ---------------- Calculator Endpoints (/api/config) ---------------- */
 app.get("/api/config", (req, res) => {
-  res.json({ ...state.calc, savedSites: state.savedSites });
+  res.json({
+    ...state.calc,
+    savedSites: state.savedSites,
+    injectInput: state.integrations?.lastInput || "",
+    injectPrice: state.integrations?.lastPrice || 0
+  });
 });
 
 app.post("/api/config", async (req, res) => {
