@@ -544,6 +544,8 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.display = "0";
     state.calc.mirror.expr = "";
     state.calc.mirror.lastKey = "clear";
+    state.calc.mirror.locked = false;
+    state.calc.mirror.hint = "";
     state.calc.mirror.updatedAt = Date.now();
     // Do NOT wipe daysAlive on normal clear so spectator info persists across clears!
     if (b.fromController) {
@@ -643,6 +645,8 @@ app.post("/api/calc/reset-bday", async (req, res) => {
   if (state.calc.mirror) {
     state.calc.mirror.display = "0";
     state.calc.mirror.expr = "";
+    state.calc.mirror.locked = false;
+    state.calc.mirror.hint = "";
   }
   state.calc.mode = 2; // Default to Time mode!
   state.calc.updatedAt = Date.now();
