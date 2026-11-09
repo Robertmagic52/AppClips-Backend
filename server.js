@@ -559,10 +559,9 @@ app.post("/api/calc/mirror/toggle", async (req, res) => {
   if (!state.calc.mirror) {
     state.calc.mirror = { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "", updatedAt: Date.now() };
   } else {
-    if (req.body?.direction) {
-      state.calc.mirror.direction = req.body.direction;
-    } else {
-      state.calc.mirror.direction = (state.calc.mirror.direction === "spectator-to-magician") ? "magician-to-spectator" : "spectator-to-magician";
+    state.calc.mirror.direction = "spectator-to-magician";
+    if (typeof req.body?.enabled === "boolean") {
+      state.calc.mirror.enabled = req.body.enabled;
     }
     state.calc.mirror.updatedAt = Date.now();
   }
@@ -1412,7 +1411,7 @@ app.get("/", (req, res) => {
         <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
       </div>
 
-      <!-- ROLE BANNER: WHO IS SENDING VS RECEIVING -->
+      <!-- ROLE BANNER: RECEIVING ONLY -->
       <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
@@ -1420,9 +1419,6 @@ app.get("/", (req, res) => {
             📡 SPECTATOR SENDS → CONTROLLER RECEIVES
           </div>
         </div>
-        <button type="button" id="toggleMirrorDirBtn" style="background:#ff9f0a;color:#000;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;">
-          ⇄ Switch Direction
-        </button>
       </div>
 
       <!-- LIVE MIRROR DISPLAY SCREEN -->
@@ -1432,37 +1428,13 @@ app.get("/", (req, res) => {
         <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
       </div>
 
-      <!-- REMOTE KEYPAD: TRANSMIT KEYSTROKES TO SPECTATOR SCREEN -->
+      <!-- REMOTE CONTROLS: ARM & RESET -->
       <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
-        <div style="font-size:10px;font-weight:700;color:#ff9f0a;text-transform:uppercase;margin-bottom:6px;">🎮 Remote Control Keypad (Click to type on spectator screen)</div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
-          <button type="button" class="rkey" data-k="lock" style="grid-column: span 2; padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM (LOCK)</button>
-          <button type="button" class="rkey" data-k="unlock" style="grid-column: span 2; padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
-
-          <button type="button" class="rkey" data-k="back" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">⌫</button>
-          <button type="button" class="rkey" data-k="clear" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">AC</button>
-          <button type="button" class="rkey" data-k="pct" style="padding:10px 0;background:#3a3a3c;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">%</button>
-          <button type="button" class="rkey" data-k="div" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">÷</button>
-
-          <button type="button" class="rkey" data-k="d7" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">7</button>
-          <button type="button" class="rkey" data-k="d8" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">8</button>
-          <button type="button" class="rkey" data-k="d9" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">9</button>
-          <button type="button" class="rkey" data-k="mul" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">×</button>
-
-          <button type="button" class="rkey" data-k="d4" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">4</button>
-          <button type="button" class="rkey" data-k="d5" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">5</button>
-          <button type="button" class="rkey" data-k="d6" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">6</button>
-          <button type="button" class="rkey" data-k="sub" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">−</button>
-
-          <button type="button" class="rkey" data-k="d1" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">1</button>
-          <button type="button" class="rkey" data-k="d2" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">2</button>
-          <button type="button" class="rkey" data-k="d3" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">3</button>
-          <button type="button" class="rkey" data-k="add" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">+</button>
-
-          <button type="button" class="rkey" data-k="sign" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">±</button>
-          <button type="button" class="rkey" data-k="d0" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">0</button>
-          <button type="button" class="rkey" data-k="dot" style="padding:10px 0;background:#2c2c2e;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;">.</button>
-          <button type="button" class="rkey" data-k="eq" style="padding:10px 0;background:#ff9f0a;color:#fff;border:0;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;">=</button>
+        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force Controls</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;" id="dashboardRemoteKeypad">
+          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM (LOCK)</button>
+          <button type="button" class="rkey" data-k="unlock" style="padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
+          <button type="button" class="rkey" data-k="clear" style="padding:10px 0; background:#3a3a3c; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">AC RESET</button>
         </div>
       </div>
 
@@ -2062,14 +2034,9 @@ async function loadCalc(onlyMirror){
       mirLastSeen.textContent = hbData.spectatorConnected ? "Spectator: Online" : "Spectator: Idle/Offline";
       mirLastSeen.style.color = hbData.spectatorConnected ? "#30d158" : "#8e8e93";
     }
-    if (mirRoleTxt && mir.direction) {
-      if (mir.direction === "spectator-to-magician") {
-        mirRoleTxt.textContent = "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
-        mirRoleTxt.style.color = "#30d158";
-      } else {
-        mirRoleTxt.textContent = "📲 DAN WHITE MODE: CONTROLLER SENDS → SPECTATOR RECEIVES";
-        mirRoleTxt.style.color = "#ff9f0a";
-      }
+    if (mirRoleTxt) {
+      mirRoleTxt.textContent = "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
+      mirRoleTxt.style.color = "#30d158";
     }
 
     // Clock Time Format update
@@ -2121,18 +2088,6 @@ setInterval(() => {
 setInterval(() => {
   loadSw(true);
 }, 1400);
-
-const togMirBtn = document.getElementById("toggleMirrorDirBtn");
-if (togMirBtn) {
-  togMirBtn.onclick = async () => {
-    try {
-      const r = await fetch("/api/calc/mirror/toggle", { method: "POST" });
-      const d = await r.json();
-      flashToast("Mirror Direction Switched!");
-      loadCalc(true);
-    } catch(e) {}
-  };
-}
 
 document.querySelectorAll("#dashboardRemoteKeypad .rkey").forEach(b => {
   b.onclick = async () => {
