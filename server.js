@@ -1810,14 +1810,14 @@ document.querySelectorAll("#emCountPills .mpill").forEach(b => {
     const count = Number(b.dataset.count);
     document.querySelectorAll("#emCountPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
     const lbl = document.getElementById("emCountLabel");
-    if (lbl) lbl.textContent = `${count} Spectators`;
+    if (lbl) lbl.textContent = count + " Spectators";
     try {
       await fetch("/api/acaat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emergenceCount: count })
       });
-      flashToast(`Emergence set to ${count} people!`);
+      flashToast("Emergence set to " + count + " people!");
       loadSw(true);
     } catch(e) {}
   };
