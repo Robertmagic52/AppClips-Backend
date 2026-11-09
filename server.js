@@ -57,7 +57,8 @@ const DEFAULT_CALC_MODES = {
     dayOfWeek: "",
     daysAlive: 0,
     at: ""
-  }
+  },
+  timeFormat: "12"
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -132,6 +133,7 @@ if (mongoose) {
       acOpenSafari: Boolean,
       mirror: { type: Object, default: {} },
       daysAlive: { type: Object, default: {} },
+      timeFormat: { type: String, default: "12" },
       updatedAt: Number
     },
     acaat: {
@@ -336,6 +338,7 @@ app.post("/api/config", async (req, res) => {
     if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
     if (typeof b.mirror.direction === "string") state.calc.mirror.direction = b.mirror.direction;
   }
+  if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
@@ -1253,6 +1256,13 @@ app.get("/", (req, res) => {
         <button type="button" class="mpill" data-mode="off">Off (Fair)</button>
       </div>
       <div class="row">
+        <label>Clock Time Format</label>
+        <div class="mode-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:180px;">
+          <button type="button" class="mpill sel" data-timefmt="12">12-Hour (11:02)</button>
+          <button type="button" class="mpill" data-timefmt="24">24-Hour (23:02)</button>
+        </div>
+      </div>
+      <div class="row">
         <label>Force Mode</label>
         <select id="swMode">
           <option value="seq" selected>Lotto / 6-Number Sequence</option>
@@ -1418,6 +1428,13 @@ app.get("/", (req, res) => {
         <button type="button" class="mpill" data-mode="1">Fixed</button>
         <button type="button" class="mpill sel" data-mode="2">Time +Offset</button>
         <button type="button" class="mpill" data-mode="3">Time Live</button>
+      </div>
+      <div class="row">
+        <label>Clock Time Format</label>
+        <div class="mode-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:180px;">
+          <button type="button" class="mpill sel" data-timefmt="12">12-Hour (11:02)</button>
+          <button type="button" class="mpill" data-timefmt="24">24-Hour (23:02)</button>
+        </div>
       </div>
       <div class="row">
         <label>Force Mode</label>
@@ -1967,6 +1984,13 @@ async function loadCalc(onlyMirror){
       }
     }
 
+    // Clock Time Format update
+    const tf = d.timeFormat || "12";
+    const tfPill = document.querySelector(\`#cTimeFmtPills .mpill[data-timefmt="\${tf}"]\`);
+    if (tfPill) {
+      document.querySelectorAll("#cTimeFmtPills .mpill").forEach(x => x.classList.toggle("sel", x === tfPill));
+    }
+
     // Days Alive update
     const mRes = await fetch("/api/calc/mirror", { cache: "no-store" });
     const mData = await mRes.json();
@@ -2017,6 +2041,19 @@ if (togMirBtn) {
     } catch(e) {}
   };
 }
+
+document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
+  b.onclick = async () => {
+    const fmt = b.dataset.timefmt;
+    document.querySelectorAll("#cTimeFmtPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
+    await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timeFormat: fmt })
+    });
+    flashToast("Status Bar Clock set to " + fmt + "-hour format!");
+  };
+});
 
 const fdaBtn = document.getElementById("forceDaysAliveBtn");
 if (fdaBtn) {
