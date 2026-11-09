@@ -482,7 +482,10 @@ app.post("/api/calc/heartbeat", (req, res) => {
   } else {
     lastCalcHeartbeatAt = now;
   }
-  if (req.body?.daysAlive && req.body.daysAlive.date) {
+  if (req.body?.resetBday) {
+    if (state.calc) state.calc.daysAlive = {};
+    saveState().catch(() => {});
+  } else if (req.body?.daysAlive && req.body.daysAlive.date) {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
     const sec = String(req.body.daysAlive.secretNum || req.body.daysAlive.secretNumber || state.calc.daysAlive?.secretNum || "");
     state.calc.daysAlive = {
@@ -618,7 +621,7 @@ app.post("/api/calc/force-days-alive", async (req, res) => {
   res.json({ ok: true, calc: state.calc });
 });
 
-app.post("/api/calc/reset-bday", (req, res) => {
+app.post("/api/calc/reset-bday", async (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   state.calc.daysAlive = {};
   if (state.calc.mirror) {
@@ -627,8 +630,8 @@ app.post("/api/calc/reset-bday", (req, res) => {
   }
   state.calc.mode = 2; // Default to Time mode!
   state.calc.updatedAt = Date.now();
-  res.json({ ok: true, calc: state.calc });
-  saveState().catch(() => {});
+  await saveState().catch(() => {});
+  res.json({ ok: true, calc: state.calc, daysAlive: {} });
 });
 
 app.post("/api/acaat/reset-emergence", async (req, res) => {
