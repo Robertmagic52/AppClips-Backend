@@ -798,8 +798,7 @@ let isPollingActive = false;
 async function checkInjectApi() {
   if (isPollingActive) return;
   const cfg = state.integrations;
-  if (!cfg || !cfg.enabled || !cfg.apiUrl || !cfg.apiUrl.trim()) return;
-  if (cfg.autoPoll === false) return;
+  if (!cfg || !cfg.apiUrl || !cfg.apiUrl.trim()) return;
 
   isPollingActive = true;
   try {
@@ -826,7 +825,8 @@ async function checkInjectApi() {
       textOrJson = rawText;
     }
 
-    const input = resolvePayloadInput(textOrJson, null, cfg.targetField);
+    const field = cfg.targetField || "data";
+    const input = resolvePayloadInput(textOrJson, null, field);
     if (input && input !== lastPolledInput && input !== cfg.lastInput) {
       console.log(`[Inject Poller] Received new item from Inject API: "${input}"`);
       lastPolledInput = input;
@@ -840,7 +840,7 @@ async function checkInjectApi() {
   }
 }
 
-setInterval(checkInjectApi, 2500);
+setInterval(checkInjectApi, 2000);
 
 /* ---------------- Unified Mobile Control Dashboard (/) ---------------- */
 app.get("/", (req, res) => {
@@ -1113,69 +1113,41 @@ app.get("/", (req, res) => {
 
   <!-- AI & INJECT INTEGRATIONS PANE -->
   <div class="pane" id="paneAi">
-    <div class="sec">Incoming Inject Webhook (Primary Setup)</div>
+    <div class="sec">Inject API &rarr; AI Price Pipeline</div>
     <div class="card">
-      <div style="font-size:13px;color:#a1a1a6;margin-bottom:12px;line-height:1.4;">
-        Inject sends spectator searches <b>incoming to SmartCalc</b>. In your Inject app's Webhook settings, paste this Webhook URL:
+      <div style="font-size:13px;color:#a1a1a6;margin-bottom:14px;line-height:1.45;">
+        SmartCalc checks your <b>Inject API</b> continuously in the background. As soon as a spectator performs a search in Inject, SmartCalc grabs the item, prompts AI to determine the realistic price in USD, and arms the calculator automatically!
       </div>
 
-      <div class="subbox" style="background:#0d1117;border:1.5px solid #1e4628;">
-        <div class="subhead" style="color:#30d158;display:flex;justify-content:space-between;align-items:center;">
-          <span>⚡ SmartCalc Webhook URL (Paste into Inject)</span>
-          <button type="button" id="copyWebhookBtn" style="background:#238636;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">📋 Copy Webhook URL</button>
+      <div class="subbox" style="border:1.5px solid var(--orange);">
+        <div class="subhead" style="color:var(--orange);display:flex;justify-content:space-between;align-items:center;">
+          <span>Your Inject API URL</span>
+          <button type="button" id="pollApiNowBtn" style="background:var(--orange);color:#000;border:0;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">⚡ Check Inject API Now</button>
         </div>
-        <input type="text" id="aiWebhookUrl" readonly value="https://smartcalc-backend-el0f.onrender.com/api/inject" style="font-family:ui-monospace,monospace;font-size:12.5px;color:#30d158;background:#000;border:1px solid #1e4628;margin-top:6px;padding:8px 10px;">
-        <div style="font-size:11px;color:#8e8e93;margin-top:6px;line-height:1.3;">
-          Paste this exact URL into <b>Inject &gt; Settings &gt; Webhooks</b>. Whenever a spectator searches in Inject, Inject fires an incoming request directly here!
+        <input type="url" id="aiApiUrl" placeholder="https://... (Paste your Inject API endpoint here)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;background:#000;padding:9px;">
+        <div style="font-size:11px;color:#8e8e93;margin-top:6px;">SmartCalc checks this URL every 2 seconds automatically in the background.</div>
+      </div>
+
+      <div class="subbox" style="margin-top:10px;">
+        <div class="subhead">Data Field in Inject JSON</div>
+        <input type="text" id="aiTargetField" placeholder="data (e.g. data, text, query, peek)" value="data">
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the spectator's search (defaults to <code>data</code> in Inject, with auto-detection for <code>query</code>, <code>search</code>, <code>text</code>, or raw text).</div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:9px 12px;background:#111c14;border:1px solid #1e4628;border-radius:9px;">
+        <span style="font-size:16px;">🟢</span>
+        <div style="font-size:12px;color:#30d158;font-weight:600;">
+          Continuous Background Checking Active (Every 2s)
         </div>
       </div>
 
-      <div class="subbox" style="margin-top:12px;">
-        <div class="subhead">Data Field to Read from Inject (Optional)</div>
-        <div style="display:flex;gap:8px;">
-          <input type="text" id="aiTargetField" placeholder="data (e.g. data, text, query, peek)" value="data" style="flex:1;">
-          <button type="button" id="saveTargetFieldBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 12px;font-size:11px;font-weight:700;cursor:pointer;">💾 Save Field</button>
-        </div>
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the item name (defaults to <code>data</code> in Inject, with auto-detection for <code>query</code>, <code>text</code>, <code>peek</code>, <code>search</code>, or raw text).</div>
-      </div>
-
-      <div class="subbox" style="margin-top:12px;background:#161b22;border:1px dashed #30363d;">
-        <div class="subhead" style="color:#ff9f0a;">
-          <span>🧪 Test Incoming Inject Webhook</span>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:6px;">
-          <input type="text" id="aiSimulateInput" placeholder="e.g. Rolex Submariner or 1968 Gibson Les Paul" value="Rolex Submariner" style="flex:1;font-size:13px;">
-          <button type="button" id="sendSimulatedWebhookBtn" style="background:#ff9f0a;color:#000;border:0;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">⚡ Test Inbound</button>
-        </div>
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Simulates Inject firing an incoming webhook with this peek to verify that AI prices it and arms SmartCalc!</div>
-      </div>
+      <button type="button" class="btn" id="saveInjectConfigBtn" style="margin-top:12px;background:#2c2c2e;color:#fff;border:1px solid #3a3a3c;">💾 Save Inject API Settings</button>
     </div>
 
-    <div class="sec">Live Inbound Webhook Activity Log</div>
+    <div class="sec">Live Peeks Caught From Inject &rarr; AI Force Log</div>
     <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Real-time feed of spectator peeks received from Inject:</div>
-      <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No incoming webhooks yet. Paste the Webhook URL into Inject to start!</div>
-    </div>
-
-    <div class="sec">Outbound Inject API Poller (Optional / Advanced)</div>
-    <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;">
-        Only use this if your setup requires SmartCalc to actively poll an external API endpoint instead of receiving incoming webhooks.
-      </div>
-      <div class="subbox">
-        <div class="subhead">
-          <span>External API URL to Poll</span>
-          <div style="display:flex;gap:6px;">
-            <button type="button" id="saveApiUrlBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">💾 Save</button>
-            <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Poll Now</button>
-          </div>
-        </div>
-        <input type="url" id="aiApiUrl" placeholder="https://... (Leave blank if using incoming webhooks above)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;">
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <label style="font-size:14px;font-weight:600;">Auto-Poll Continuously (Every 2.5s)</label>
-        <input id="aiAutoPoll" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
-      </div>
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Live feed of spectator peeks grabbed from your Inject API:</div>
+      <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No peeks grabbed yet. Paste your Inject API URL above to start!</div>
     </div>
 
     <div class="sec">AI &amp; Search API Keys</div>
@@ -1620,7 +1592,8 @@ async function loadIntegrationsConfig(){
     if (d && d.integrations){
       const it = d.integrations;
       document.getElementById("aiApiUrl").value = it.apiUrl || "";
-      document.getElementById("aiAutoPoll").checked = (it.autoPoll !== false);
+      const ap = document.getElementById("aiAutoPoll");
+      if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
       document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
       document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-1.5-flash";
@@ -1636,76 +1609,80 @@ async function loadIntegrationsConfig(){
 function renderAiLogs(logs){
   const el = document.getElementById("aiLogList");
   if (!logs || !logs.length){
-    el.textContent = "No webhook requests yet. Paste the Webhook URL into Inject to start!";
+    el.textContent = "No peeks grabbed yet. Paste your Inject API URL above to start!";
     return;
   }
   el.textContent = logs.map(l => {
     const time = new Date(l.ts).toLocaleTimeString();
-    return "[" + time + '] "' + (l.input || "") + '" -> FORCED: ' + (l.price || 0) + ' (' + (l.source || "") + ')';
+    return "[" + time + '] "' + (l.input || "") + '" -> FORCED: $' + (l.price || 0) + ' (' + (l.source || "") + ')';
   }).join(String.fromCharCode(10));
 }
 
-document.getElementById("copyWebhookBtn").onclick = () => {
-  const url = document.getElementById("aiWebhookUrl").value;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => flashToast("Webhook URL Copied!"));
-  } else {
-    document.getElementById("aiWebhookUrl").select();
-    document.execCommand("copy");
-    flashToast("Webhook URL Copied!");
-  }
-};
-
-document.getElementById("saveTargetFieldBtn").onclick = async () => {
+async function saveInjectConfigHelper(){
+  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
   const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
   try {
     const res = await fetch("/api/integrations/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetField })
+      body: JSON.stringify({ apiUrl, targetField, autoPoll: true })
     });
-    const data = await res.json();
-    if (data.ok) {
-      flashToast("Data Field Saved: " + targetField);
-      loadIntegrationsConfig();
-    } else {
-      flashToast("Error saving field");
-    }
+    const d = await res.json();
+    return d.ok;
   } catch(e) {
-    flashToast("Save failed");
+    return false;
+  }
+}
+
+document.getElementById("aiApiUrl").onblur = () => {
+  if (document.getElementById("aiApiUrl").value.trim()) saveInjectConfigHelper();
+};
+document.getElementById("aiTargetField").onblur = () => {
+  saveInjectConfigHelper();
+};
+
+document.getElementById("saveInjectConfigBtn").onclick = async () => {
+  const ok = await saveInjectConfigHelper();
+  if (ok) {
+    flashToast("Inject API Settings Saved & Active!");
+    loadIntegrationsConfig();
+  } else {
+    flashToast("Error saving settings");
   }
 };
 
-document.getElementById("sendSimulatedWebhookBtn").onclick = async () => {
-  const input = (document.getElementById("aiSimulateInput").value || "").trim();
-  if (!input) {
-    flashToast("Enter an item to simulate!");
+document.getElementById("pollApiNowBtn").onclick = async () => {
+  const btn = document.getElementById("pollApiNowBtn");
+  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
+  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
+
+  if (!apiUrl) {
+    flashToast("Please paste your Inject API URL first!");
+    document.getElementById("aiApiUrl").focus();
     return;
   }
-  const btn = document.getElementById("sendSimulatedWebhookBtn");
-  btn.textContent = "Sending...";
+
+  btn.textContent = "Checking...";
   btn.disabled = true;
+
   try {
-    const field = (document.getElementById("aiTargetField").value || "").trim() || "data";
-    const payload = {};
-    payload[field] = input;
-    const res = await fetch("/api/inject", {
+    const res = await fetch("/api/integrations/poll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ apiUrl, targetField })
     });
     const data = await res.json();
     if (data.ok) {
-      flashToast('Incoming Peek: "' + (data.input || "") + '" -> Forced: $' + Number(data.forceNumber).toLocaleString());
+      flashToast('Inject Peek: "' + (data.input || "") + '" -> Forced: $' + Number(data.forceNumber).toLocaleString());
       loadCalc();
       loadIntegrationsConfig();
     } else {
-      alert("Incoming Webhook Error: " + (data.error || "Failed"));
+      alert("Inject API Error: " + (data.error || "Failed to fetch from Inject API"));
     }
   } catch(err) {
     alert("Connection Error: " + err.message);
   } finally {
-    btn.textContent = "⚡ Test Inbound";
+    btn.textContent = "⚡ Check Inject API Now";
     btn.disabled = false;
   }
 };
@@ -1718,7 +1695,7 @@ document.getElementById("resetPromptBtn").onclick = () => {
 document.getElementById("saveAiConfigBtn").onclick = async () => {
   const body = {
     apiUrl: document.getElementById("aiApiUrl").value.trim(),
-    autoPoll: document.getElementById("aiAutoPoll").checked,
+    autoPoll: true,
     targetField: document.getElementById("aiTargetField").value.trim() || "data",
     geminiApiKey: document.getElementById("aiGeminiKey").value.trim(),
     geminiModel: document.getElementById("aiGeminiModel").value,
@@ -1778,56 +1755,6 @@ document.getElementById("runAiTestBtn").onclick = async () => {
     btn.disabled = false;
   }
 };
-
-document.getElementById("saveApiUrlBtn").onclick = async () => {
-  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
-  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
-  const autoPoll = document.getElementById("aiAutoPoll").checked;
-  if (!apiUrl) {
-    flashToast("Please paste your Inject API URL first!");
-    document.getElementById("aiApiUrl").focus();
-    return;
-  }
-  try {
-    const res = await fetch("/api/integrations/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiUrl, targetField, autoPoll })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      flashToast("Inject API URL Saved!");
-      loadIntegrationsConfig();
-    } else {
-      flashToast("Error saving URL");
-    }
-  } catch(e) {
-    flashToast("Save failed");
-  }
-};
-
-document.getElementById("pollApiNowBtn").onclick = async () => {
-  const btn = document.getElementById("pollApiNowBtn");
-  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
-  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
-
-  if (!apiUrl) {
-    flashToast("Please paste your Inject API URL first!");
-    document.getElementById("aiApiUrl").focus();
-    return;
-  }
-
-  btn.textContent = "Fetching...";
-  btn.disabled = true;
-
-  try {
-    const res = await fetch("/api/integrations/poll", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiUrl, targetField })
-    });
-    const data = await res.json();
-    if (data.ok) {
       flashToast("Inject Peek: " + (data.input || "") + " -> Forced: $" + Number(data.forceNumber).toLocaleString());
       loadCalc();
       loadIntegrationsConfig();
