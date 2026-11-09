@@ -527,6 +527,28 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     };
   }
   const b = req.body || {};
+  const isClear = (b.key === "clear" || b.key === "ac" || b.clearAll === true);
+
+  if (isClear) {
+    state.calc.mirror.display = "0";
+    state.calc.mirror.expr = "";
+    state.calc.mirror.lastKey = "clear";
+    state.calc.mirror.updatedAt = Date.now();
+    state.calc.daysAlive = {};
+    if (b.fromController) {
+      state.calc.mirror.controllerKey = {
+        key: "clear",
+        seq: Number(b.seq) || Date.now(),
+        showHint: false
+      };
+      lastControllerHeartbeatAt = Date.now();
+    } else {
+      lastCalcHeartbeatAt = Date.now();
+    }
+    saveState().catch(() => {});
+    return res.json({ ok: true, mirror: state.calc.mirror, daysAlive: {} });
+  }
+
   if (b.fromController) {
     state.calc.mirror.controllerKey = {
       key: String(b.key || ""),
@@ -596,7 +618,7 @@ app.post("/api/calc/force-days-alive", async (req, res) => {
   res.json({ ok: true, calc: state.calc });
 });
 
-app.post("/api/calc/reset-bday", async (req, res) => {
+app.post("/api/calc/reset-bday", (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   state.calc.daysAlive = {};
   if (state.calc.mirror) {
@@ -605,8 +627,8 @@ app.post("/api/calc/reset-bday", async (req, res) => {
   }
   state.calc.mode = 2; // Default to Time mode!
   state.calc.updatedAt = Date.now();
-  await saveState();
   res.json({ ok: true, calc: state.calc });
+  saveState().catch(() => {});
 });
 
 app.post("/api/acaat/reset-emergence", async (req, res) => {
