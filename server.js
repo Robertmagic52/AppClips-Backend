@@ -43,7 +43,21 @@ const DEFAULT_CALC_MODES = {
   chunk: 1,
   hold: 0.15,
   autoOpOnLock: false,
-  hintStyle: "bright"
+  hintStyle: "bright",
+  mirror: {
+    enabled: true,
+    direction: "spectator-to-magician",
+    display: "0",
+    expr: "",
+    lastKey: "",
+    updatedAt: 0
+  },
+  daysAlive: {
+    date: "",
+    dayOfWeek: "",
+    daysAlive: 0,
+    at: ""
+  }
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -116,6 +130,8 @@ if (mongoose) {
       clockOpenSafari: Boolean,
       acRedirectUrl: String,
       acOpenSafari: Boolean,
+      mirror: { type: Object, default: {} },
+      daysAlive: { type: Object, default: {} },
       updatedAt: Number
     },
     acaat: {
@@ -315,6 +331,11 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.clockOpenSafari === "boolean") state.calc.clockOpenSafari = b.clockOpenSafari;
   if (typeof b.acRedirectUrl === "string") state.calc.acRedirectUrl = b.acRedirectUrl.trim();
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
+  if (typeof b.mirror === "object" && b.mirror) {
+    if (!state.calc.mirror) state.calc.mirror = {};
+    if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
+    if (typeof b.mirror.direction === "string") state.calc.mirror.direction = b.mirror.direction;
+  }
   if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
@@ -423,10 +444,101 @@ app.post("/api/acaat/peek", (req, res) => {
       }
     }
   }
+  if (entry.type === "DAYS_ALIVE" || b.daysAlive) {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.daysAlive = {
+      date: String(b.date || "").trim(),
+      dayOfWeek: String(b.dayOfWeek || "").trim(),
+      daysAlive: Number(b.daysAlive) || 0,
+      at: entry.at
+    };
+    state.calc.updatedAt = Date.now();
+  }
   state.peeks.unshift(entry);
   if (state.peeks.length > 20) state.peeks.pop();
   saveState();
   res.json({ ok: true });
+});
+
+// Covert Heartbeat & Connection Tracking
+let lastCalcHeartbeatAt = 0;
+let lastControllerHeartbeatAt = 0;
+
+app.post("/api/calc/heartbeat", (req, res) => {
+  const isCtrl = !!req.body?.controller;
+  const now = Date.now();
+  if (isCtrl) {
+    lastControllerHeartbeatAt = now;
+  } else {
+    lastCalcHeartbeatAt = now;
+  }
+  const spectatorConnected = (now - lastCalcHeartbeatAt) < 5500;
+  const controllerConnected = (now - lastControllerHeartbeatAt) < 5500;
+  res.json({
+    ok: true,
+    now,
+    spectatorConnected,
+    controllerConnected,
+    mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "" }
+  });
+});
+
+app.post("/api/calc/mirror/keystroke", (req, res) => {
+  if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+  if (!state.calc.mirror) {
+    state.calc.mirror = {
+      enabled: true,
+      direction: "spectator-to-magician",
+      display: "0",
+      expr: "",
+      lastKey: "",
+      updatedAt: Date.now()
+    };
+  }
+  const b = req.body || {};
+  state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
+  state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
+  state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
+  state.calc.mirror.updatedAt = Date.now();
+  lastCalcHeartbeatAt = Date.now();
+  res.json({ ok: true, mirror: state.calc.mirror });
+});
+
+app.get("/api/calc/mirror", (req, res) => {
+  res.json({
+    ok: true,
+    mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "" },
+    daysAlive: state.calc?.daysAlive || {},
+    spectatorConnected: (Date.now() - lastCalcHeartbeatAt) < 5500,
+    controllerConnected: (Date.now() - lastControllerHeartbeatAt) < 5500
+  });
+});
+
+app.post("/api/calc/mirror/toggle", async (req, res) => {
+  if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+  if (!state.calc.mirror) {
+    state.calc.mirror = { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "", updatedAt: Date.now() };
+  } else {
+    if (req.body?.direction) {
+      state.calc.mirror.direction = req.body.direction;
+    } else {
+      state.calc.mirror.direction = (state.calc.mirror.direction === "spectator-to-magician") ? "magician-to-spectator" : "spectator-to-magician";
+    }
+    state.calc.mirror.updatedAt = Date.now();
+  }
+  await saveState();
+  res.json({ ok: true, mirror: state.calc.mirror });
+});
+
+app.post("/api/calc/force-days-alive", async (req, res) => {
+  if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+  if (state.calc.daysAlive?.daysAlive) {
+    state.calc.mode = 1;
+    state.calc.fixed = String(state.calc.daysAlive.daysAlive);
+    state.calc.updatedAt = Date.now();
+    await saveState();
+  }
+  res.json({ ok: true, calc: state.calc });
 });
 
 app.post("/api/acaat/reset-emergence", async (req, res) => {
@@ -1222,6 +1334,69 @@ app.get("/", (req, res) => {
 
   <!-- CALCULATOR PANE -->
   <div class="pane" id="paneCalc">
+    <!-- COVERT HEARTBEAT & LIVE MIRROR CARD -->
+    <div class="card" style="background:#13151b;border:1px solid #ff9f0a;border-radius:12px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div id="calcSignalBars" style="display:inline-flex;align-items:flex-end;gap:2px;height:12px;">
+            <span class="cbar cb1" style="width:3px;height:4px;background:#30d158;border-radius:1px;"></span>
+            <span class="cbar cb2" style="width:3px;height:6.5px;background:#30d158;border-radius:1px;"></span>
+            <span class="cbar cb3" style="width:3px;height:9px;background:#30d158;border-radius:1px;"></span>
+            <span class="cbar cb4" style="width:3px;height:12px;background:#30d158;border-radius:1px;"></span>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:#ff9f0a;text-transform:uppercase;letter-spacing:0.05em;">
+            5G Heartbeat &amp; Keystroke Mirror
+          </span>
+        </div>
+        <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
+      </div>
+
+      <!-- LIVE MIRROR DISPLAY -->
+      <div style="background:#000;border:1px solid #2c2c2e;border-radius:10px;padding:12px;text-align:right;">
+        <div style="font-size:10px;color:#636366;text-transform:uppercase;letter-spacing:0.05em;float:left;">Spectator Screen Mirror</div>
+        <div id="mirrorExprDisp" style="font-size:13px;color:#8e8e93;min-height:16px;"></div>
+        <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #2c2c2e;">
+        <span id="mirrorLastKeyDisp" style="font-size:11px;color:#8e8e93;font-family:ui-monospace,monospace;">Last Key: None</span>
+        <button type="button" id="toggleMirrorDirBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">
+          Direction: Spectator → Magician
+        </button>
+      </div>
+    </div>
+
+    <!-- DAYS ALIVE SIRI BIRTHDAY ROUTINE CARD -->
+    <div class="card" style="background:#13151b;border:1px solid #30d158;border-radius:12px;padding:14px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:700;color:#30d158;text-transform:uppercase;letter-spacing:0.05em;">
+          🎂 "Days Alive" Siri Birthday Routine
+        </div>
+        <span id="daysAliveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Ready</span>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Spectator Born On</div>
+          <div id="daysAliveDate" style="font-size:18px;font-weight:700;color:#fff;margin-top:2px;">Waiting for birthday math...</div>
+          <div id="daysAliveMeta" style="font-size:12px;color:#636366;margin-top:2px;">(Spectator types Month × Day × Year)</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Days Alive</div>
+          <div id="daysAliveNum" style="font-size:32px;font-weight:800;color:#30d158;font-variant-numeric:tabular-nums;line-height:1.1;">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;padding:8px 10px;background:#18191f;border-radius:8px;border:1px solid #2c2c2e;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:11px;color:#8e8e93;">
+          <strong style="color:#fff;">Siri Prompt:</strong> <span id="siriPromptText">"Hey Siri, how many days ago was [Date]?"</span>
+        </div>
+        <button type="button" id="forceDaysAliveBtn" style="background:#30d158;color:#000;border:0;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">
+          Force on Calc
+        </button>
+      </div>
+    </div>
+
     <div class="sec">Calculator Force Settings (Tap Mode to Switch Live)</div>
     <div class="card">
       <button type="button" id="resetCalcModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Calculator Modes to Default (Keeps Redirects)</button>
@@ -1683,32 +1858,147 @@ async function loadSw(onlyPeeks){
   } catch(e){}
 }
 
-async function loadCalc(){
+let calcLoaded = false;
+let lastKnownMirrorKey = "";
+
+async function loadCalc(onlyMirror){
   try {
-    const r = await fetch("/api/config", { cache: "no-store" });
-    const d = await r.json();
-    if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
-    document.getElementById("cMode").value = String(d.mode ?? 2);
-    syncCalcPills();
-    document.getElementById("cFixed").value = d.fixed || "";
-    document.getElementById("cOffset").value = d.offset ?? 60;
-    document.getElementById("cChunk").value = String(d.chunk ?? 1);
-    document.getElementById("cHold").value = d.hold ?? 0.5;
-    document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
-    document.getElementById("cHintStyle").value = d.hintStyle || "both";
-    document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
-    document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
-    document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
-    document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
-    document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
-    document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
-    renderSavedSitesUI();
+    if (!onlyMirror || !calcLoaded) {
+      const r = await fetch("/api/config", { cache: "no-store" });
+      const d = await r.json();
+      calcLoaded = true;
+      if (Array.isArray(d.savedSites)) savedSites = d.savedSites;
+      document.getElementById("cMode").value = String(d.mode ?? 2);
+      syncCalcPills();
+      document.getElementById("cFixed").value = d.fixed || "";
+      document.getElementById("cOffset").value = d.offset ?? 60;
+      document.getElementById("cChunk").value = String(d.chunk ?? 1);
+      document.getElementById("cHold").value = d.hold ?? 0.5;
+      document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
+      document.getElementById("cHintStyle").value = d.hintStyle || "both";
+      document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
+      document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
+      document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
+      document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
+      document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
+      document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
+      renderSavedSitesUI();
+    }
+
+    // Ping heartbeat & mirror endpoint
+    const hbRes = await fetch("/api/calc/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ controller: true })
+    });
+    const hbData = await hbRes.json();
+
+    const connBadge = document.getElementById("calcConnBadge");
+    const sigBars = document.getElementById("calcSignalBars");
+    if (hbData.spectatorConnected) {
+      if (connBadge) {
+        connBadge.textContent = "✓ 5G LIVE & PAIRED";
+        connBadge.style.background = "rgba(48,209,88,0.2)";
+        connBadge.style.color = "#30d158";
+      }
+      if (sigBars) {
+        sigBars.querySelectorAll(".cbar").forEach(b => {
+          b.style.background = "#30d158";
+          b.style.opacity = "1";
+        });
+      }
+    } else {
+      if (connBadge) {
+        connBadge.textContent = "1 BAR / IDLE";
+        connBadge.style.background = "#2c2c2e";
+        connBadge.style.color = "#8e8e93";
+      }
+      if (sigBars) {
+        const bars = sigBars.querySelectorAll(".cbar");
+        if (bars[0]) { bars[0].style.background = "#ff9f0a"; bars[0].style.opacity = "1"; }
+        for (let i = 1; i < bars.length; i++) {
+          bars[i].style.background = "rgba(255,255,255,0.25)";
+          bars[i].style.opacity = "0.25";
+        }
+      }
+    }
+
+    // Mirror screen update
+    const mir = hbData.mirror || {};
+    const mirPrim = document.getElementById("mirrorPrimaryDisp");
+    const mirExpr = document.getElementById("mirrorExprDisp");
+    const mirKey = document.getElementById("mirrorLastKeyDisp");
+    const mirBtn = document.getElementById("toggleMirrorDirBtn");
+
+    if (mirPrim && mir.display !== undefined) mirPrim.textContent = mir.display || "0";
+    if (mirExpr && mir.expr !== undefined) mirExpr.textContent = mir.expr || "";
+    if (mirKey && mir.lastKey) {
+      mirKey.textContent = "Last Key: " + mir.lastKey;
+      if (mir.lastKey !== lastKnownMirrorKey) {
+        lastKnownMirrorKey = mir.lastKey;
+        if (navigator.vibrate) try { navigator.vibrate(25); } catch(_) {}
+      }
+    }
+    if (mirBtn && mir.direction) {
+      mirBtn.textContent = (mir.direction === "spectator-to-magician")
+        ? "Direction: Spectator → Magician"
+        : "Direction: Magician → Spectator (Dan White)";
+    }
+
+    // Days Alive update
+    const mRes = await fetch("/api/calc/mirror", { cache: "no-store" });
+    const mData = await mRes.json();
+    const da = mData.daysAlive;
+    if (da && da.daysAlive) {
+      const daDate = document.getElementById("daysAliveDate");
+      const daMeta = document.getElementById("daysAliveMeta");
+      const daNum = document.getElementById("daysAliveNum");
+      const daBadge = document.getElementById("daysAliveBadge");
+      const siriPrompt = document.getElementById("siriPromptText");
+
+      if (daDate) daDate.textContent = da.date + " (" + da.dayOfWeek + ")";
+      const dayIdx = (da.dayOfWeek === "Sunday") ? 7 : (["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].indexOf(da.dayOfWeek) + 1);
+      if (daMeta) daMeta.textContent = "Keypad Cue: " + da.dayOfWeek + " (Key " + dayIdx + ")";
+      if (daNum) daNum.textContent = Number(da.daysAlive).toLocaleString();
+      if (daBadge) {
+        daBadge.textContent = "✓ CAPTURED";
+        daBadge.style.background = "rgba(48,209,88,0.2)";
+        daBadge.style.color = "#30d158";
+      }
+      if (siriPrompt) siriPrompt.textContent = '\"Hey Siri, how many days ago was ' + da.date + '?\"';
+    }
   } catch(e){}
 }
 
 loadSw(false);
-loadCalc();
-setInterval(() => loadSw(true), 1500);
+loadCalc(false);
+setInterval(() => {
+  loadSw(true);
+  loadCalc(true);
+}, 1500);
+
+const togMirBtn = document.getElementById("toggleMirrorDirBtn");
+if (togMirBtn) {
+  togMirBtn.onclick = async () => {
+    try {
+      const r = await fetch("/api/calc/mirror/toggle", { method: "POST" });
+      const d = await r.json();
+      flashToast("Mirror Direction Switched!");
+      loadCalc(true);
+    } catch(e) {}
+  };
+}
+
+const fdaBtn = document.getElementById("forceDaysAliveBtn");
+if (fdaBtn) {
+  fdaBtn.onclick = async () => {
+    try {
+      await fetch("/api/calc/force-days-alive", { method: "POST" });
+      flashToast("Days Alive Set as Active Force!");
+      loadCalc(false);
+    } catch(e) {}
+  };
+}
 
 async function pushSwNow(toastText){
   const targets = [];
