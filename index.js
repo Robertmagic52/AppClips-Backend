@@ -491,7 +491,7 @@ app.post("/api/calc/heartbeat", (req, res) => {
     saveState().catch(() => {});
   } else if (req.body?.daysAlive && req.body.daysAlive.date) {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
-    const isSuppressed = state.calc.bdayResetAt && (now - state.calc.bdayResetAt < 25000);
+    const isSuppressed = state.calc.bdayResetAt && (now - state.calc.bdayResetAt < 45000);
     if (!isSuppressed) {
       const sec = String(req.body.daysAlive.secretNum || req.body.daysAlive.secretNumber || state.calc.daysAlive?.secretNum || "");
       state.calc.daysAlive = {
@@ -566,6 +566,9 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
       seq: Number(b.seq) || Date.now(),
       showHint: b.showHint
     };
+    if (b.display !== undefined) state.calc.mirror.display = String(b.display);
+    if (b.expr !== undefined) state.calc.mirror.expr = String(b.expr);
+    state.calc.mirror.lastKey = String(b.key || "");
     state.calc.mirror.updatedAt = Date.now();
     lastControllerHeartbeatAt = Date.now();
   } else {
@@ -580,12 +583,15 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
       state.calc.daysAlive.secretNumber = String(b.secretNum);
     }
     if (b.daysAlive && b.daysAlive.date) {
-      state.calc.daysAlive = {
-        ...state.calc.daysAlive,
-        ...b.daysAlive,
-        secretNum: String(b.daysAlive.secretNum || b.secretNum || state.calc.daysAlive?.secretNum || ""),
-        secretNumber: String(b.daysAlive.secretNumber || b.secretNum || state.calc.daysAlive?.secretNum || "")
-      };
+      const isSuppressed = state.calc.bdayResetAt && (Date.now() - state.calc.bdayResetAt < 45000);
+      if (!isSuppressed) {
+        state.calc.daysAlive = {
+          ...state.calc.daysAlive,
+          ...b.daysAlive,
+          secretNum: String(b.daysAlive.secretNum || b.secretNum || state.calc.daysAlive?.secretNum || ""),
+          secretNumber: String(b.daysAlive.secretNumber || b.secretNum || state.calc.daysAlive?.secretNum || "")
+        };
+      }
     }
     state.calc.mirror.updatedAt = Date.now();
     lastCalcHeartbeatAt = Date.now();
@@ -598,6 +604,7 @@ app.get("/api/calc/mirror", (req, res) => {
     ok: true,
     mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "" },
     daysAlive: state.calc?.daysAlive || {},
+    bdayResetAt: state.calc?.bdayResetAt || 0,
     spectatorConnected: (Date.now() - lastCalcHeartbeatAt) < 5500,
     controllerConnected: (Date.now() - lastControllerHeartbeatAt) < 5500
   });
