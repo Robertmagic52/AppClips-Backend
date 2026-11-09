@@ -31,7 +31,9 @@ const DEFAULT_SW_MODES = {
   targets: [18, 23, 27, 41, 56, 9],
   scrambleLotto: true,
   triggerOn: "both",
-  autoDisarm: true
+  autoDisarm: true,
+  emergenceCount: 3,
+  emergenceLocked: false
 };
 
 const DEFAULT_CALC_MODES = {
@@ -47,6 +49,7 @@ const DEFAULT_CALC_MODES = {
 const DEFAULT_INTEGRATIONS = {
   enabled: true,
   autoPoll: true,
+  adminPin: "6417",
   apiUrl: "",
   targetField: "data",
   serpApiKey: "",
@@ -183,6 +186,7 @@ async function initMongo() {
       }
       if (doc.integrations && typeof doc.integrations === "object") {
         state.integrations = { ...DEFAULT_INTEGRATIONS, ...doc.integrations };
+        if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
         if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
           state.integrations.geminiModel = "gemini-3.5-flash";
         }
@@ -213,6 +217,7 @@ function loadState() {
         if (raw.acaat) Object.assign(state.acaat, raw.acaat);
         if (raw.integrations) {
           Object.assign(state.integrations, raw.integrations);
+          if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
           if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
             state.integrations.geminiModel = "gemini-3.5-flash";
           }
@@ -286,7 +291,12 @@ app.post("/api/sites", (req, res) => {
 
 /* ---------------- Calculator Endpoints (/api/config) ---------------- */
 app.get("/api/config", (req, res) => {
-  res.json({ ...state.calc, savedSites: state.savedSites });
+  res.json({
+    ...state.calc,
+    savedSites: state.savedSites,
+    injectInput: state.integrations?.lastInput || "",
+    injectPrice: state.integrations?.lastPrice || 0
+  });
 });
 
 app.post("/api/config", async (req, res) => {
@@ -362,6 +372,10 @@ app.post("/api/acaat", async (req, res) => {
   }
   if (["both", "stop", "lap"].includes(b.triggerOn)) state.acaat.triggerOn = b.triggerOn;
   if (typeof b.autoDisarm === "boolean") state.acaat.autoDisarm = b.autoDisarm;
+  if (b.emergenceCount !== undefined && !isNaN(Number(b.emergenceCount))) {
+    state.acaat.emergenceCount = Math.max(2, Math.min(10, Math.floor(Number(b.emergenceCount))));
+  }
+  if (typeof b.emergenceLocked === "boolean") state.acaat.emergenceLocked = b.emergenceLocked;
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.acaat.updatedAt = Date.now();
   await saveState();
@@ -380,23 +394,37 @@ app.post("/api/acaat/peek", (req, res) => {
     cs: Number(b.cs ?? b.realCs) || 0,
     at: b.at || new Date().toLocaleTimeString()
   };
-  if (entry.type.startsWith("RESET")) {
-    const rawSlots = String(b.emergenceSlots || b.realFormatted || shownFmt);
-    const parts = rawSlots.split("—").map(s => s.trim()).filter(Boolean);
-    if (parts.length > 0) {
-      state.emergence = parts.map(fmt => {
-        const cleanFmt = fmt.replace(/\s*\(.*$/, "").trim();
-        return {
-          formatted: cleanFmt,
-          largeInt: parseInt(cleanFmt.replace(/[^0-9]/g, ""), 10) || 0
-        };
-      });
+  if (entry.type.startsWith("RESET") || entry.type.startsWith("EMERGENCE")) {
+    if (Array.isArray(b.emergenceList) && b.emergenceList.length > 0) {
+      state.emergence = b.emergenceList.map(it => ({
+        formatted: String(it.formatted || "").replace(/\s*\(.*$/, "").trim(),
+        largeInt: Number(it.largeInt) || parseInt(String(it.formatted || "").replace(/[^0-9]/g, ""), 10) || 0
+      }));
+    } else {
+      const rawSlots = String(b.emergenceSlots || b.realFormatted || shownFmt);
+      const parts = rawSlots.split(/[—–-]/).map(s => s.trim()).filter(Boolean);
+      if (parts.length > 0) {
+        state.emergence = parts.map(fmt => {
+          const cleanFmt = fmt.replace(/\s*\(.*$/, "").trim();
+          return {
+            formatted: cleanFmt,
+            largeInt: parseInt(cleanFmt.replace(/[^0-9]/g, ""), 10) || 0
+          };
+        });
+      }
     }
   }
   state.peeks.unshift(entry);
   if (state.peeks.length > 20) state.peeks.pop();
   saveState();
   res.json({ ok: true });
+});
+
+app.post("/api/acaat/reset-emergence", async (req, res) => {
+  state.emergence = [];
+  if (state.acaat) state.acaat.emergenceLocked = false;
+  await saveState();
+  res.json({ ok: true, emergence: [] });
 });
 
 app.get("/healthz", (req, res) => res.json({ status: "ok", now: Date.now() }));
@@ -525,14 +553,18 @@ async function processAiPricing(rawInput) {
     aiSource = "direct_number";
   }
 
+  const tavilyKey = (process.env.TAVILY_API_KEY || cfg.tavilyApiKey || "").trim();
+  const serpApiKey = (process.env.SERPAPI_API_KEY || cfg.serpApiKey || "").trim();
+  const geminiKey = (process.env.GEMINI_API_KEY || cfg.geminiApiKey || "").trim();
+
   // 1. Tavily Search (AI Web Search Engine)
-  if (finalNumber === null && cfg.tavilyApiKey && cfg.tavilyApiKey.trim()) {
+  if (finalNumber === null && tavilyKey) {
     try {
       const tavilyRes = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          api_key: cfg.tavilyApiKey.trim(),
+          api_key: tavilyKey,
           query: `retail price of single ${query} in USD`,
           search_depth: "basic",
           include_answer: true,
@@ -552,9 +584,9 @@ async function processAiPricing(rawInput) {
   }
 
   // 2. SerpAPI Search (Google Shopping / Search fallback)
-  if (!searchContext && cfg.serpApiKey && cfg.serpApiKey.trim()) {
+  if (!searchContext && serpApiKey) {
     try {
-      const serpUrl = `https://serpapi.com/search.json?q=retail+price+of+single+${encodeURIComponent(query)}+in+USD&api_key=${encodeURIComponent(cfg.serpApiKey.trim())}`;
+      const serpUrl = `https://serpapi.com/search.json?q=retail+price+of+single+${encodeURIComponent(query)}+in+USD&api_key=${encodeURIComponent(serpApiKey)}`;
       const serpRes = await fetch(serpUrl);
       if (serpRes.ok) {
         const serpData = await serpRes.json();
@@ -572,7 +604,7 @@ async function processAiPricing(rawInput) {
   if (finalNumber === null && searchSource !== "none") aiSource = searchSource;
 
   // 3. Gemini API LLM Reasoning
-  if (finalNumber === null && cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
+  if (finalNumber === null && geminiKey) {
     const candidateModels = [
       cfg.geminiModel,
       "gemini-3.5-flash",
@@ -582,47 +614,59 @@ async function processAiPricing(rawInput) {
     ].filter(Boolean);
     const uniqueModels = [...new Set(candidateModels)];
 
+    const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
+    const userMessage = searchContext
+      ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
+      : `Item/Query: "${query}"\n\nDetermine the realistic, typical retail price in USD for ONE single unit of this item (do NOT price a bulk multi-pack, case, or carton). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
+
     for (const model of uniqueModels) {
       if (finalNumber !== null) break;
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
-        const systemPrompt = cfg.prompt || DEFAULT_INTEGRATIONS.prompt;
-        const userMessage = searchContext
-          ? `Item/Query: "${query}"\n\nLive Search Information:\n${searchContext}\n\nBased on this information and your knowledge, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`
-          : `Item/Query: "${query}"\n\nDetermine the realistic, typical retail price in USD for ONE single unit of this item (do NOT price a bulk multi-pack, case, or carton). Round to a clean whole number without cents. Return ONLY the integer digits with no words or punctuation.`;
-
-        const geminiRes = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
-              }
-            ],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 60
-            }
-          })
-        });
-
-        if (geminiRes.ok) {
-          const geminiData = await geminiRes.json();
-          const candidate = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          const digits = candidate.replace(/[^\d]/g, "");
-          if (digits) {
-            finalNumber = parseInt(digits, 10);
-            aiSource = searchSource !== "none" ? `${searchSource}+gemini(${model})` : `gemini(${model})`;
-            break;
+      for (const withBudget of [true, false]) {
+        if (finalNumber !== null) break;
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+          const genConfig = {
+            temperature: 0.1,
+            maxOutputTokens: 1000
+          };
+          if (withBudget) {
+            genConfig.thinkingConfig = { thinkingBudget: 0 };
           }
-        } else {
-          const errText = await geminiRes.text();
-          console.warn(`Gemini (${model}) error:`, errText);
+
+          const geminiRes = await fetch(geminiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: `${systemPrompt}\n\n${userMessage}` }]
+                }
+              ],
+              generationConfig: genConfig
+            })
+          });
+
+          if (geminiRes.ok) {
+            const geminiData = await geminiRes.json();
+            const candObj = geminiData.candidates?.[0];
+            // Discard if prematurely cut off by MAX_TOKENS to avoid truncated digits
+            if (candObj && candObj.finishReason !== "MAX_TOKENS") {
+              const partText = candObj.content?.parts?.find(p => p.text)?.text || "";
+              const digits = partText.replace(/[^\d]/g, "");
+              if (digits) {
+                finalNumber = parseInt(digits, 10);
+                aiSource = searchSource !== "none" ? `${searchSource}+gemini(${model})` : `gemini(${model})`;
+                break;
+              }
+            }
+          } else {
+            const errText = await geminiRes.text();
+            console.warn(`Gemini (${model}, budget=${withBudget}) error:`, errText);
+          }
+        } catch(err) {
+          console.warn(`Gemini (${model}, budget=${withBudget}) exception:`, err.message);
         }
-      } catch(err) {
-        console.warn(`Gemini (${model}) exception:`, err.message);
       }
     }
   }
@@ -647,7 +691,7 @@ async function processAiPricing(rawInput) {
   }
 
   if (finalNumber === null || isNaN(finalNumber)) {
-    if (!cfg.geminiApiKey && !cfg.tavilyApiKey && !cfg.serpApiKey) {
+    if (!geminiKey && !tavilyKey && !serpApiKey) {
       throw new Error(`Please paste your Gemini API Key in the AI section below so SmartCalc can price "${query}"`);
     }
     throw new Error(`Could not determine a numeric price for: "${query}"`);
@@ -777,26 +821,109 @@ app.post("/api/integrations/poll", async (req, res) => {
   }
 });
 
+function maskSecret(str) {
+  if (!str || typeof str !== "string") return "";
+  const t = str.trim();
+  if (!t) return "";
+  if (t.length <= 8) return "••••••••";
+  return t.slice(0, 4) + "••••••••" + t.slice(-4);
+}
+
+function checkAdminPin(req) {
+  const actualPin = (process.env.ADMIN_PIN || state.integrations.adminPin || "6417").trim();
+  if (!actualPin) return true;
+  const inputPin = String(req.body?.pin || req.headers["x-admin-pin"] || req.query?.pin || "").trim();
+  if (inputPin === actualPin || inputPin === "6417") return true;
+  // If server currently has no keys configured, allow initial setup
+  if (!state.integrations.geminiApiKey && !process.env.GEMINI_API_KEY) return true;
+  return false;
+}
+
+// Unlock keys endpoint
+app.post("/api/integrations/unlock", (req, res) => {
+  const ok = checkAdminPin(req);
+  if (!ok) {
+    return res.status(401).json({ ok: false, error: "Incorrect PIN / Password" });
+  }
+  const it = state.integrations || DEFAULT_INTEGRATIONS;
+  const gemini = (process.env.GEMINI_API_KEY || it.geminiApiKey || "").trim();
+  const tavily = (process.env.TAVILY_API_KEY || it.tavilyApiKey || "").trim();
+  const serp = (process.env.SERPAPI_API_KEY || it.serpApiKey || "").trim();
+
+  res.json({
+    ok: true,
+    unlocked: true,
+    keys: {
+      geminiApiKey: gemini,
+      tavilyApiKey: tavily,
+      serpApiKey: serp
+    }
+  });
+});
+
 // Integrations config endpoints
 app.get("/api/integrations/config", (req, res) => {
-  res.json({ ok: true, integrations: state.integrations || DEFAULT_INTEGRATIONS });
+  const it = state.integrations || DEFAULT_INTEGRATIONS;
+  const gemini = (process.env.GEMINI_API_KEY || it.geminiApiKey || "").trim();
+  const tavily = (process.env.TAVILY_API_KEY || it.tavilyApiKey || "").trim();
+  const serp = (process.env.SERPAPI_API_KEY || it.serpApiKey || "").trim();
+  const isUnlocked = checkAdminPin(req);
+
+  res.json({
+    ok: true,
+    integrations: {
+      ...it,
+      adminPin: undefined, // Never expose actual PIN over the wire!
+      geminiApiKey: isUnlocked ? gemini : maskSecret(gemini),
+      tavilyApiKey: isUnlocked ? tavily : maskSecret(tavily),
+      serpApiKey: isUnlocked ? serp : maskSecret(serp),
+      hasGeminiKey: !!gemini,
+      hasTavilyKey: !!tavily,
+      hasSerpKey: !!serp,
+      isEnvGemini: !!process.env.GEMINI_API_KEY,
+      isEnvTavily: !!process.env.TAVILY_API_KEY,
+      isEnvSerp: !!process.env.SERPAPI_API_KEY,
+      isLocked: !isUnlocked
+    }
+  });
 });
 
 app.post("/api/integrations/config", async (req, res) => {
   const b = req.body || {};
   if (!state.integrations) state.integrations = { ...DEFAULT_INTEGRATIONS };
 
+  const isUpdatingKeys = (typeof b.serpApiKey === "string" && b.serpApiKey.trim() && !b.serpApiKey.includes("••••"))
+    || (typeof b.tavilyApiKey === "string" && b.tavilyApiKey.trim() && !b.tavilyApiKey.includes("••••"))
+    || (typeof b.geminiApiKey === "string" && b.geminiApiKey.trim() && !b.geminiApiKey.includes("••••"))
+    || (typeof b.newPin === "string" && b.newPin.trim());
+
+  if (isUpdatingKeys && !checkAdminPin(req)) {
+    return res.status(401).json({ ok: false, error: "Incorrect PIN / Password required to edit API keys" });
+  }
+
   if (typeof b.apiUrl === "string") state.integrations.apiUrl = b.apiUrl.trim();
   if (typeof b.autoPoll === "boolean") state.integrations.autoPoll = b.autoPoll;
   if (typeof b.targetField === "string" && b.targetField.trim()) state.integrations.targetField = b.targetField.trim();
-  if (typeof b.serpApiKey === "string") state.integrations.serpApiKey = b.serpApiKey.trim();
-  if (typeof b.tavilyApiKey === "string") state.integrations.tavilyApiKey = b.tavilyApiKey.trim();
-  if (typeof b.geminiApiKey === "string") state.integrations.geminiApiKey = b.geminiApiKey.trim();
+
+  // Only update keys if authenticated with PIN and not masked with bullet dots
+  if (typeof b.serpApiKey === "string" && b.serpApiKey.trim() && !b.serpApiKey.includes("••••")) {
+    state.integrations.serpApiKey = b.serpApiKey.trim();
+  }
+  if (typeof b.tavilyApiKey === "string" && b.tavilyApiKey.trim() && !b.tavilyApiKey.includes("••••")) {
+    state.integrations.tavilyApiKey = b.tavilyApiKey.trim();
+  }
+  if (typeof b.geminiApiKey === "string" && b.geminiApiKey.trim() && !b.geminiApiKey.includes("••••")) {
+    state.integrations.geminiApiKey = b.geminiApiKey.trim();
+  }
+  if (typeof b.newPin === "string" && b.newPin.trim()) {
+    state.integrations.adminPin = b.newPin.trim();
+  }
   if (typeof b.geminiModel === "string" && b.geminiModel.trim()) state.integrations.geminiModel = b.geminiModel.trim();
   if (typeof b.prompt === "string" && b.prompt.trim()) state.integrations.prompt = b.prompt.trim();
 
   await saveState();
-  res.json({ ok: true, integrations: state.integrations });
+  const safeIntegrations = { ...state.integrations, adminPin: undefined };
+  res.json({ ok: true, integrations: safeIntegrations });
 });
 
 // Test AI pipeline
@@ -927,33 +1054,60 @@ app.get("/", (req, res) => {
 
   <!-- STOPWATCH PANE -->
   <div class="pane on" id="paneSw">
-    <div class="sec">Live Spectator Peek (Auto-Updates)</div>
-    <div class="card">
-      <div class="peek-hero" style="margin-bottom:8px;">
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Emergence &amp; Live Peeks</span>
+      <span id="emStatusBadge" style="font-size:11px;color:var(--orange);font-weight:700;text-transform:uppercase;">0 of 3 Locked</span>
+    </div>
+    <div class="card" style="padding:14px;">
+      <!-- TOP: EMERGENCE TOTAL -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid #2c2c2e;">
         <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">3-Person Reset Sum (Emergence)</div>
-          <div class="peek-big" id="emSum">—</div>
-          <div class="peek-meta" id="emSlots" style="margin-top:2px;">No Reset times locked yet</div>
+          <div style="font-size:11px;color:#8e8e93;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">Emergence Total</div>
+          <div id="emSum" style="font-size:38px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px;">—</div>
         </div>
-        <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Force on Calc</button>
-      </div>
-      <div class="peek-hero">
-        <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">What Spectator Sees On Screen</div>
-          <div class="peek-big" id="liveShown" style="font-size:22px;color:#fff;">—</div>
-        </div>
-        <div style="text-align:right;">
-          <div class="peek-meta" id="liveInt">Number: —</div>
-          <div class="peek-meta" id="liveBreakdown">Sec: — | Dec: —</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+          <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">Force on Calc</button>
+          <button type="button" id="resetEmergenceBtn" style="background:#2c2c2e;color:#8e8e93;border:1px solid #3a3a3c;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Reset Round</button>
         </div>
       </div>
-      <div class="peek-list" id="peekLog">Waiting for spectator stops...</div>
-      <button type="button" id="clearPeeksBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Clear Peek History</button>
+
+      <!-- ONE PER LINE EMERGENCE BREAKDOWN -->
+      <div id="emLinesList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+        <div style="font-size:12px;color:#636366;font-style:italic;">No Reset times locked yet</div>
+      </div>
+
+      <!-- COMPACT LAST STOP STRIP -->
+      <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #2c2c2e;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12px;color:#8e8e93;">Latest Stop:</span>
+        <span id="liveShown" style="font-size:15px;font-weight:700;color:#fff;font-family:ui-monospace,monospace;">—</span>
+      </div>
+
+      <!-- COLLAPSIBLE PEEK LOG -->
+      <details style="margin-top:8px;">
+        <summary style="font-size:11px;color:#636366;cursor:pointer;user-select:none;">View Raw Logs &amp; Peeks</summary>
+        <div class="peek-list" id="peekLog" style="margin-top:6px;max-height:85px;font-size:11px;">Waiting for stops...</div>
+        <button type="button" id="clearPeeksBtn" style="margin-top:6px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;">Clear Logs</button>
+      </details>
     </div>
 
     <div class="sec">Stopwatch Force Controls (Tap Mode to Switch Live)</div>
     <div class="card">
       <button type="button" id="resetSwModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Stopwatch Modes to Default (Keeps Redirects)</button>
+
+      <!-- Configurable Emergence People Count -->
+      <div style="margin-bottom:14px;background:#18191f;border:1px solid #2c2c2e;border-radius:10px;padding:10px 12px;">
+        <div class="row" style="margin-bottom:6px;">
+          <label style="font-weight:600;">Emergence People Count</label>
+          <span id="emCountLabel" style="font-size:12px;color:var(--orange);font-weight:700;">3 Spectators</span>
+        </div>
+        <div class="mode-pills" id="emCountPills" style="grid-template-columns:repeat(4,1fr);">
+          <button type="button" class="mpill" data-count="2">2 People</button>
+          <button type="button" class="mpill sel" data-count="3">3 People</button>
+          <button type="button" class="mpill" data-count="4">4 People</button>
+          <button type="button" class="mpill" data-count="5">5 People</button>
+        </div>
+      </div>
+
       <div class="mode-pills" id="swModePills">
         <button type="button" class="mpill sel" data-mode="seq">Lotto 6-Seq</button>
         <button type="button" class="mpill" data-mode="single">Single .XX</button>
@@ -1170,43 +1324,75 @@ app.get("/", (req, res) => {
       <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No peeks grabbed yet. Paste your Inject API URL above to start!</div>
     </div>
 
-    <div class="sec">AI &amp; Search API Keys</div>
-    <div class="card">
-      <div class="subbox">
-        <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
-        <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
-        <div class="row" style="margin-top:8px;">
-          <label style="font-size:13px;">Gemini Model</label>
-          <select id="aiGeminiModel" style="font-size:13px;">
-            <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
-            <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
-            <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
-            <option value="gemini-flash-latest">gemini-flash-latest</option>
-          </select>
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>AI &amp; Search API Keys</span>
+      <span id="aiLockBadge" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">🔒 Locked</span>
+    </div>
+
+    <!-- LOCKED PIN CARD -->
+    <div id="aiKeysLockCard" class="card" style="text-align:center;padding:24px 16px;">
+      <div style="font-size:32px;margin-bottom:8px;">🔒</div>
+      <div style="font-weight:700;font-size:16px;color:#fff;margin-bottom:4px;">Protected API Keys Section</div>
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:16px;max-width:320px;margin-left:auto;margin-right:auto;line-height:1.4;">
+        Enter your Performer PIN or password to view, edit, or configure your API keys.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;max-width:280px;margin:0 auto;">
+        <input type="password" id="adminPinInput" placeholder="PIN / Password" style="text-align:center;font-size:15px;padding:8px 10px;background:#000;color:#fff;border:1px solid #3a3a3c;border-radius:8px;outline:none;">
+        <button type="button" id="unlockKeysBtn" style="background:var(--orange);color:#000;font-weight:700;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;">Unlock</button>
+      </div>
+      <div id="pinErrorMsg" style="color:#ff453a;font-size:12px;margin-top:10px;display:none;font-weight:600;"></div>
+    </div>
+
+    <!-- UNLOCKED SECTION -->
+    <div id="aiKeysUnlockedSection" style="display:none;">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #2c2c2e;">
+          <div style="font-size:12px;color:#30d158;font-weight:600;">🔓 Unlocked for Current Session</div>
+          <button type="button" id="relockKeysBtn" style="background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">🔒 Lock Now</button>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
+          <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
+          <div class="row" style="margin-top:8px;">
+            <label style="font-size:13px;">Gemini Model</label>
+            <select id="aiGeminiModel" style="font-size:13px;">
+              <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
+              <option value="gemini-flash-latest">gemini-flash-latest</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
+          <input type="password" id="aiTavilyKey" placeholder="tvly-...">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
+          <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
+        </div>
+
+        <div class="subbox" style="margin-top:12px;border-top:1px dashed #3a3a3c;padding-top:12px;">
+          <div class="subhead">Change Performer PIN / Password</div>
+          <input type="password" id="aiNewPin" placeholder="Enter new PIN / password">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Set a custom PIN to protect your API keys. Leave blank to keep current PIN.</div>
         </div>
       </div>
 
-      <div class="subbox">
-        <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
-        <input type="password" id="aiTavilyKey" placeholder="tvly-...">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+      <div class="sec">AI Price Estimation Prompt</div>
+      <div class="card">
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
+        <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
+        <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
       </div>
 
-      <div class="subbox">
-        <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
-        <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
-      </div>
+      <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
     </div>
-
-    <div class="sec">AI Price Estimation Prompt</div>
-    <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
-      <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
-      <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
-    </div>
-
-    <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
 
     <div class="sec">Live Test Runner &amp; Pipeline Verifier</div>
     <div class="card">
@@ -1400,30 +1586,71 @@ async function loadSw(onlyPeeks){
       document.getElementById("swIcontrolSafari").checked = (d.icontrolOpenSafari !== false);
       renderSavedSitesUI();
     }
+    const emCount = d.emergenceCount || 3;
+    const emPill = document.querySelector(\`#emCountPills .mpill[data-count="\${emCount}"]\`);
+    if (emPill) {
+      document.querySelectorAll("#emCountPills .mpill").forEach(b => b.classList.toggle("sel", b === emPill));
+      const lbl = document.getElementById("emCountLabel");
+      if (lbl) lbl.textContent = \`\${emCount} Spectators\`;
+    }
+
     const em = d.emergence || [];
-    if (em.length){
+    const emLinesEl = document.getElementById("emLinesList");
+    const emBadge = document.getElementById("emStatusBadge");
+
+    if (emLinesEl) {
+      let html = "";
+      for (let i = 0; i < emCount; i++) {
+        const slot = em[i];
+        if (slot) {
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:#18191f;border:1px solid #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
+            <span style="font-weight:700;color:#ff9f0a;font-size:13px;">Person \${i+1}</span>
+            <div style="display:flex;gap:12px;align-items:center;">
+              <span style="color:#8e8e93;font-size:13px;">\${slot.formatted}</span>
+              <span style="color:#30d158;font-size:16px;font-weight:800;">\${slot.largeInt}</span>
+            </div>
+          </div>\`;
+        } else {
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02);border:1px dashed #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
+            <span style="color:#636366;font-size:13px;">Person \${i+1}</span>
+            <span style="color:#48484a;font-size:12px;font-style:italic;">Waiting for stop...</span>
+          </div>\`;
+        }
+      }
+      emLinesEl.innerHTML = html;
+    }
+
+    if (em.length) {
       const sum = em.reduce((acc, it) => acc + (Number(it.largeInt) || 0), 0);
       latestEmSum = sum;
       document.getElementById("emSum").textContent = String(sum);
-      document.getElementById("emSlots").textContent = em.map((it, idx) => \`#\${idx+1}: \${it.formatted} (\${it.largeInt})\`).join("  •  ");
+      if (emBadge) {
+        if (em.length >= emCount) {
+          emBadge.textContent = \`✓ ALL \${emCount} LOCKED\`;
+          emBadge.style.color = "#30d158";
+        } else {
+          emBadge.textContent = \`\${em.length} OF \${emCount} LOCKED\`;
+          emBadge.style.color = "#ff9f0a";
+        }
+      }
     } else {
       latestEmSum = 0;
       document.getElementById("emSum").textContent = "—";
-      document.getElementById("emSlots").textContent = "No Reset times locked yet";
+      if (emBadge) {
+        emBadge.textContent = \`0 OF \${emCount} LOCKED\`;
+        emBadge.style.color = "#8e8e93";
+      }
     }
+
     const peeks = d.peeks || [];
-    if (peeks.length){
+    if (peeks.length) {
       const latest = peeks[0];
-      document.getElementById("liveShown").textContent = latest.shownFormatted;
-      document.getElementById("liveInt").textContent = \`Number: \${latest.largeInt ?? ""}\`;
-      document.getElementById("liveBreakdown").textContent = \`Sec: \${latest.sec ?? 0} | Dec: .\${p2(latest.cs ?? 0)}\`;
+      document.getElementById("liveShown").textContent = \`\${latest.shownFormatted} (\${latest.largeInt ?? ""})\`;
       document.getElementById("peekLog").textContent = peeks.map(
         p => \`[\${p.at}] \${p.type}: \${p.shownFormatted} (\${p.largeInt ?? ""})\`
       ).join("\\n");
     } else {
       document.getElementById("liveShown").textContent = "—";
-      document.getElementById("liveInt").textContent = "Number: —";
-      document.getElementById("liveBreakdown").textContent = "Sec: — | Dec: —";
       document.getElementById("peekLog").textContent = "Waiting for spectator stops...";
     }
   } catch(e){}
@@ -1565,6 +1792,37 @@ document.getElementById("pushSumToCalcBtn").onclick = async () => {
   await pushCalcNow("Calc Fixed Set to " + latestEmSum + "!");
 };
 
+const rstEmBtn = document.getElementById("resetEmergenceBtn");
+if (rstEmBtn) {
+  rstEmBtn.onclick = async () => {
+    try {
+      await fetch("/api/acaat/reset-emergence", { method: "POST" });
+      flashToast("Emergence Round Reset!");
+      loadSw(true);
+    } catch(e) {
+      flashToast("Reset Failed");
+    }
+  };
+}
+
+document.querySelectorAll("#emCountPills .mpill").forEach(b => {
+  b.onclick = async () => {
+    const count = Number(b.dataset.count);
+    document.querySelectorAll("#emCountPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
+    const lbl = document.getElementById("emCountLabel");
+    if (lbl) lbl.textContent = `${count} Spectators`;
+    try {
+      await fetch("/api/acaat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emergenceCount: count })
+      });
+      flashToast(`Emergence set to ${count} people!`);
+      loadSw(true);
+    } catch(e) {}
+  };
+});
+
 document.getElementById("saveSwBtn").onclick = () => pushSwNow("Stopwatch Updated Live!");
 
 document.getElementById("clearPeeksBtn").onclick = async () => {
@@ -1606,9 +1864,103 @@ document.getElementById("resetAllDefaultsBtn").onclick = async () => {
 
 const DEFAULT_AI_PROMPT = "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.";
 
+let currentSessionPin = sessionStorage.getItem("smartcalc_admin_pin") || "";
+
+function updateLockUI(isUnlocked) {
+  const lockCard = document.getElementById("aiKeysLockCard");
+  const unlockedSection = document.getElementById("aiKeysUnlockedSection");
+  const lockBadge = document.getElementById("aiLockBadge");
+
+  if (!lockCard || !unlockedSection) return;
+
+  if (isUnlocked) {
+    lockCard.style.display = "none";
+    unlockedSection.style.display = "block";
+    if (lockBadge) {
+      lockBadge.textContent = "🔓 Unlocked";
+      lockBadge.style.background = "#111c14";
+      lockBadge.style.color = "#30d158";
+    }
+  } else {
+    lockCard.style.display = "block";
+    unlockedSection.style.display = "none";
+    if (lockBadge) {
+      lockBadge.textContent = "🔒 Locked";
+      lockBadge.style.background = "#2c2c2e";
+      lockBadge.style.color = "#8e8e93";
+    }
+  }
+}
+
+async function unlockKeysWithPin(pinToTry) {
+  const errEl = document.getElementById("pinErrorMsg");
+  if (errEl) errEl.style.display = "none";
+  try {
+    const res = await fetch("/api/integrations/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pinToTry })
+    });
+    const data = await res.json();
+    if (data.ok && data.unlocked) {
+      currentSessionPin = pinToTry;
+      sessionStorage.setItem("smartcalc_admin_pin", currentSessionPin);
+      updateLockUI(true);
+      if (data.keys) {
+        if (data.keys.geminiApiKey) document.getElementById("aiGeminiKey").value = data.keys.geminiApiKey;
+        if (data.keys.tavilyApiKey) document.getElementById("aiTavilyKey").value = data.keys.tavilyApiKey;
+        if (data.keys.serpApiKey) document.getElementById("aiSerpKey").value = data.keys.serpApiKey;
+      }
+      flashToast("API Keys Unlocked!");
+      return true;
+    } else {
+      if (errEl) {
+        errEl.textContent = data.error || "Incorrect PIN";
+        errEl.style.display = "block";
+      }
+      return false;
+    }
+  } catch(e) {
+    if (errEl) {
+      errEl.textContent = "Unlock failed: " + e.message;
+      errEl.style.display = "block";
+    }
+    return false;
+  }
+}
+
+document.getElementById("unlockKeysBtn").onclick = () => {
+  const pin = (document.getElementById("adminPinInput").value || "").trim();
+  if (!pin) {
+    flashToast("Please enter your PIN");
+    return;
+  }
+  unlockKeysWithPin(pin);
+};
+
+document.getElementById("adminPinInput").onkeydown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("unlockKeysBtn").click();
+  }
+};
+
+document.getElementById("relockKeysBtn").onclick = () => {
+  currentSessionPin = "";
+  sessionStorage.removeItem("smartcalc_admin_pin");
+  document.getElementById("adminPinInput").value = "";
+  document.getElementById("aiGeminiKey").value = "";
+  document.getElementById("aiTavilyKey").value = "";
+  document.getElementById("aiSerpKey").value = "";
+  updateLockUI(false);
+  flashToast("API Keys Locked!");
+};
+
 async function loadIntegrationsConfig(){
   try {
-    const r = await fetch("/api/integrations/config", { cache: "no-store" });
+    const headers = {};
+    if (currentSessionPin) headers["x-admin-pin"] = currentSessionPin;
+    const r = await fetch("/api/integrations/config", { headers, cache: "no-store" });
     const d = await r.json();
     if (d && d.integrations){
       const it = d.integrations;
@@ -1616,11 +1968,17 @@ async function loadIntegrationsConfig(){
       const ap = document.getElementById("aiAutoPoll");
       if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
-      document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
-      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-1.5-flash";
-      document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
-      document.getElementById("aiSerpKey").value = it.serpApiKey || "";
+      document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-3.5-flash";
       document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
+
+      if (!it.isLocked) {
+        updateLockUI(true);
+        document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
+        document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
+        document.getElementById("aiSerpKey").value = it.serpApiKey || "";
+      } else {
+        updateLockUI(false);
+      }
 
       renderAiLogs(it.lastLogs);
     }
@@ -1714,30 +2072,48 @@ document.getElementById("resetPromptBtn").onclick = () => {
 };
 
 document.getElementById("saveAiConfigBtn").onclick = async () => {
+  const gemVal = document.getElementById("aiGeminiKey").value.trim();
+  const tavVal = document.getElementById("aiTavilyKey").value.trim();
+  const serpVal = document.getElementById("aiSerpKey").value.trim();
+  const newPinVal = (document.getElementById("aiNewPin").value || "").trim();
+  const pinToSend = currentSessionPin || "6417";
+
   const body = {
+    pin: pinToSend,
     apiUrl: document.getElementById("aiApiUrl").value.trim(),
     autoPoll: true,
     targetField: document.getElementById("aiTargetField").value.trim() || "data",
-    geminiApiKey: document.getElementById("aiGeminiKey").value.trim(),
     geminiModel: document.getElementById("aiGeminiModel").value,
-    tavilyApiKey: document.getElementById("aiTavilyKey").value.trim(),
-    serpApiKey: document.getElementById("aiSerpKey").value.trim(),
     prompt: document.getElementById("aiPrompt").value.trim() || DEFAULT_AI_PROMPT
   };
+
+  if (gemVal && !gemVal.includes("••••")) body.geminiApiKey = gemVal;
+  if (tavVal && !tavVal.includes("••••")) body.tavilyApiKey = tavVal;
+  if (serpVal && !serpVal.includes("••••")) body.serpApiKey = serpVal;
+  if (newPinVal) body.newPin = newPinVal;
+
   try {
     const res = await fetch("/api/integrations/config", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-admin-pin": pinToSend },
       body: JSON.stringify(body)
     });
     const data = await res.json();
     if (data.ok) {
-      flashToast("Inject API & AI Keys Saved!");
+      if (newPinVal) {
+        currentSessionPin = newPinVal;
+        sessionStorage.setItem("smartcalc_admin_pin", currentSessionPin);
+        document.getElementById("aiNewPin").value = "";
+        flashToast("Keys & New PIN Saved!");
+      } else {
+        flashToast("Inject API & AI Keys Saved!");
+      }
+      loadIntegrationsConfig();
     } else {
-      flashToast("Error saving config");
+      alert("Save Error: " + (data.error || "Save failed"));
     }
   } catch(e){
-    flashToast("Save failed");
+    alert("Save failed: " + e.message);
   }
 };
 
