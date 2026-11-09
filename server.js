@@ -525,7 +525,11 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
   }
   const b = req.body || {};
   if (b.fromController) {
-    state.calc.mirror.controllerKey = { key: String(b.key || ""), seq: Number(b.seq) || Date.now() };
+    state.calc.mirror.controllerKey = {
+      key: String(b.key || ""),
+      seq: Number(b.seq) || Date.now(),
+      showHint: b.showHint
+    };
     state.calc.mirror.updatedAt = Date.now();
     lastControllerHeartbeatAt = Date.now();
   } else {
