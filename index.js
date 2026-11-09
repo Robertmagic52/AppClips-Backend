@@ -1755,19 +1755,6 @@ document.getElementById("runAiTestBtn").onclick = async () => {
     btn.disabled = false;
   }
 };
-      flashToast("Inject Peek: " + (data.input || "") + " -> Forced: $" + Number(data.forceNumber).toLocaleString());
-      loadCalc();
-      loadIntegrationsConfig();
-    } else {
-      alert("Inject Fetch Error: " + (data.error || "Failed to fetch from Inject API"));
-    }
-  } catch(err) {
-    alert("Connection Error: " + err.message);
-  } finally {
-    btn.textContent = "⚡ Fetch From Inject Now";
-    btn.disabled = false;
-  }
-};
 
 loadIntegrationsConfig();
 </script>
