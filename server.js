@@ -584,6 +584,11 @@ app.post("/api/calc/force-days-alive", async (req, res) => {
 app.post("/api/calc/reset-bday", async (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   state.calc.daysAlive = {};
+  if (state.calc.mirror) {
+    state.calc.mirror.display = "0";
+    state.calc.mirror.expr = "";
+  }
+  state.calc.mode = 2; // Default to Time mode!
   state.calc.updatedAt = Date.now();
   await saveState();
   res.json({ ok: true, calc: state.calc });
