@@ -492,9 +492,18 @@ async function processAiPricing(rawInput) {
   const cfg = state.integrations;
   let searchContext = "";
   let searchSource = "none";
+  let finalNumber = null;
+  let aiSource = "none";
+
+  // Check if input is directly a price/number (e.g. "$450", "450", "1200", "$1,500.00")
+  const directMatch = query.match(/^\$?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.00)?$/);
+  if (directMatch) {
+    finalNumber = parseInt(directMatch[1].replace(/,/g, ""), 10);
+    aiSource = "direct_number";
+  }
 
   // 1. Tavily Search (AI Web Search Engine)
-  if (cfg.tavilyApiKey && cfg.tavilyApiKey.trim()) {
+  if (finalNumber === null && cfg.tavilyApiKey && cfg.tavilyApiKey.trim()) {
     try {
       const tavilyRes = await fetch("https://api.tavily.com/search", {
         method: "POST",
@@ -537,11 +546,10 @@ async function processAiPricing(rawInput) {
     }
   }
 
-  let finalNumber = null;
-  let aiSource = searchSource;
+  if (finalNumber === null && searchSource !== "none") aiSource = searchSource;
 
   // 3. Gemini API LLM Reasoning
-  if (cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
+  if (finalNumber === null && cfg.geminiApiKey && cfg.geminiApiKey.trim()) {
     try {
       const geminiModel = cfg.geminiModel || "gemini-1.5-flash";
       const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(cfg.geminiApiKey.trim())}`;
@@ -604,6 +612,9 @@ async function processAiPricing(rawInput) {
   }
 
   if (finalNumber === null || isNaN(finalNumber)) {
+    if (!cfg.geminiApiKey && !cfg.tavilyApiKey && !cfg.serpApiKey) {
+      throw new Error(`Please paste your Gemini API Key in the AI section below so SmartCalc can price "${query}"`);
+    }
     throw new Error(`Could not determine a numeric price for: "${query}"`);
   }
 
@@ -665,20 +676,67 @@ app.all(["/api/webhook", "/api/inject"], async (req, res) => {
 // Outbound API poller endpoint
 app.post("/api/integrations/poll", async (req, res) => {
   try {
-    const cfg = state.integrations || DEFAULT_INTEGRATIONS;
-    if (!cfg.apiUrl || !cfg.apiUrl.trim()) {
-      return res.status(400).json({ ok: false, error: "No external API URL configured" });
+    if (!state.integrations) state.integrations = { ...DEFAULT_INTEGRATIONS };
+
+    const body = req.body || {};
+    let reqUrl = (body.apiUrl || req.query?.apiUrl || "").trim();
+    let reqField = (body.targetField || req.query?.targetField || "").trim();
+
+    // If client supplied new url or field in payload, update and persist state
+    if (reqUrl) {
+      state.integrations.apiUrl = reqUrl;
+      if (reqField) state.integrations.targetField = reqField;
+      await saveState();
     }
 
-    const extRes = await fetch(cfg.apiUrl.trim(), { cache: "no-store" });
-    if (!extRes.ok) throw new Error(`External API returned HTTP ${extRes.status}`);
+    const cfg = state.integrations;
+    let url = reqUrl || cfg.apiUrl?.trim();
+    const field = reqField || cfg.targetField || "data";
 
-    const extData = await extRes.json();
-    const input = extractField(extData, cfg.targetField) || resolvePayloadInput(extData, null, cfg.targetField);
-    if (!input) throw new Error(`Could not find field '${cfg.targetField}' in external API response`);
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        error: "No external API URL configured. Please paste your Inject API URL in the box above."
+      });
+    }
+
+    if (!/^https?:\/\//i.test(url)) {
+      url = "https://" + url;
+    }
+
+    const extRes = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*"
+      }
+    });
+
+    if (!extRes.ok) {
+      throw new Error(`External Inject API returned HTTP ${extRes.status} (${extRes.statusText})`);
+    }
+
+    let parsedData;
+    const rawText = await extRes.text();
+    try {
+      parsedData = JSON.parse(rawText);
+    } catch(_) {
+      parsedData = rawText;
+    }
+
+    const input = resolvePayloadInput(parsedData, null, field);
+    if (!input) {
+      throw new Error(`Could not find field '${field}' or any text in Inject API response. Received: ${rawText.slice(0, 150)}`);
+    }
 
     const result = await processAiPricing(String(input));
-    res.json({ ok: true, input, forceNumber: result.price, source: result.source });
+    res.json({
+      ok: true,
+      input,
+      forceNumber: result.price,
+      source: result.source,
+      calc: state.calc
+    });
   } catch(err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -730,23 +788,27 @@ async function checkInjectApi() {
 
   isPollingActive = true;
   try {
-    const res = await fetch(cfg.apiUrl.trim(), { cache: "no-store" });
+    let url = cfg.apiUrl.trim();
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+    const res = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*"
+      }
+    });
     if (!res.ok) {
       isPollingActive = false;
       return;
     }
 
     let textOrJson;
-    const contentType = res.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      textOrJson = await res.json();
-    } else {
-      const rawText = await res.text();
-      try {
-        textOrJson = JSON.parse(rawText);
-      } catch(_) {
-        textOrJson = rawText;
-      }
+    const rawText = await res.text();
+    try {
+      textOrJson = JSON.parse(rawText);
+    } catch(_) {
+      textOrJson = rawText;
     }
 
     const input = resolvePayloadInput(textOrJson, null, cfg.targetField);
@@ -1045,7 +1107,10 @@ app.get("/", (req, res) => {
       <div class="subbox">
         <div class="subhead">
           <span>Your Inject API URL</span>
-          <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Fetch From Inject Now</button>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="saveApiUrlBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">💾 Save</button>
+            <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Fetch From Inject Now</button>
+          </div>
         </div>
         <input type="url" id="aiApiUrl" placeholder="https://... (Paste your Inject API / Webhook URL here)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;">
         <div style="font-size:11px;color:#8e8e93;margin-top:5px;">Paste your Inject API endpoint here. SmartCalc reads the spectator's peek directly from this URL.</div>
@@ -1627,14 +1692,56 @@ document.getElementById("runAiTestBtn").onclick = async () => {
   }
 };
 
-document.getElementById("pollApiNowBtn").onclick = async () => {
-  const btn = document.getElementById("pollApiNowBtn");
-  btn.textContent = "Fetching...";
+document.getElementById("saveApiUrlBtn").onclick = async () => {
+  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
+  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
+  const autoPoll = document.getElementById("aiAutoPoll").checked;
+  if (!apiUrl) {
+    flashToast("Please paste your Inject API URL first!");
+    document.getElementById("aiApiUrl").focus();
+    return;
+  }
   try {
-    const res = await fetch("/api/integrations/poll", { method: "POST" });
+    const res = await fetch("/api/integrations/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiUrl, targetField, autoPoll })
+    });
     const data = await res.json();
     if (data.ok) {
-      flashToast("Inject Peek: " + (data.input || "") + " -> Forced: " + (data.forceNumber || ""));
+      flashToast("Inject API URL Saved!");
+      loadIntegrationsConfig();
+    } else {
+      flashToast("Error saving URL");
+    }
+  } catch(e) {
+    flashToast("Save failed");
+  }
+};
+
+document.getElementById("pollApiNowBtn").onclick = async () => {
+  const btn = document.getElementById("pollApiNowBtn");
+  const apiUrl = (document.getElementById("aiApiUrl").value || "").trim();
+  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
+
+  if (!apiUrl) {
+    flashToast("Please paste your Inject API URL first!");
+    document.getElementById("aiApiUrl").focus();
+    return;
+  }
+
+  btn.textContent = "Fetching...";
+  btn.disabled = true;
+
+  try {
+    const res = await fetch("/api/integrations/poll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiUrl, targetField })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      flashToast("Inject Peek: " + (data.input || "") + " -> Forced: $" + Number(data.forceNumber).toLocaleString());
       loadCalc();
       loadIntegrationsConfig();
     } else {
@@ -1644,6 +1751,7 @@ document.getElementById("pollApiNowBtn").onclick = async () => {
     alert("Connection Error: " + err.message);
   } finally {
     btn.textContent = "⚡ Fetch From Inject Now";
+    btn.disabled = false;
   }
 };
 
