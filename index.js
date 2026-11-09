@@ -47,6 +47,7 @@ const DEFAULT_CALC_MODES = {
 const DEFAULT_INTEGRATIONS = {
   enabled: true,
   autoPoll: true,
+  adminPin: "6417",
   apiUrl: "",
   targetField: "data",
   serpApiKey: "",
@@ -183,6 +184,7 @@ async function initMongo() {
       }
       if (doc.integrations && typeof doc.integrations === "object") {
         state.integrations = { ...DEFAULT_INTEGRATIONS, ...doc.integrations };
+        if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
         if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
           state.integrations.geminiModel = "gemini-3.5-flash";
         }
@@ -213,6 +215,7 @@ function loadState() {
         if (raw.acaat) Object.assign(state.acaat, raw.acaat);
         if (raw.integrations) {
           Object.assign(state.integrations, raw.integrations);
+          if (!state.integrations.adminPin) state.integrations.adminPin = "6417";
           if (!state.integrations.geminiModel || state.integrations.geminiModel.includes("1.5") || state.integrations.geminiModel.includes("2.0")) {
             state.integrations.geminiModel = "gemini-3.5-flash";
           }
@@ -801,8 +804,19 @@ function maskSecret(str) {
   return t.slice(0, 4) + "••••••••" + t.slice(-4);
 }
 
-// Integrations config endpoints
-app.get("/api/integrations/config", (req, res) => {
+function checkAdminPin(req) {
+  const actualPin = (process.env.ADMIN_PIN || state.integrations.adminPin || "6417").trim();
+  if (!actualPin) return true;
+  const inputPin = String(req.body?.pin || req.headers["x-admin-pin"] || req.query?.pin || "").trim();
+  return inputPin === actualPin;
+}
+
+// Unlock keys endpoint
+app.post("/api/integrations/unlock", (req, res) => {
+  const ok = checkAdminPin(req);
+  if (!ok) {
+    return res.status(401).json({ ok: false, error: "Incorrect PIN / Password" });
+  }
   const it = state.integrations || DEFAULT_INTEGRATIONS;
   const gemini = (process.env.GEMINI_API_KEY || it.geminiApiKey || "").trim();
   const tavily = (process.env.TAVILY_API_KEY || it.tavilyApiKey || "").trim();
@@ -810,17 +824,38 @@ app.get("/api/integrations/config", (req, res) => {
 
   res.json({
     ok: true,
+    unlocked: true,
+    keys: {
+      geminiApiKey: gemini,
+      tavilyApiKey: tavily,
+      serpApiKey: serp
+    }
+  });
+});
+
+// Integrations config endpoints
+app.get("/api/integrations/config", (req, res) => {
+  const it = state.integrations || DEFAULT_INTEGRATIONS;
+  const gemini = (process.env.GEMINI_API_KEY || it.geminiApiKey || "").trim();
+  const tavily = (process.env.TAVILY_API_KEY || it.tavilyApiKey || "").trim();
+  const serp = (process.env.SERPAPI_API_KEY || it.serpApiKey || "").trim();
+  const isUnlocked = checkAdminPin(req);
+
+  res.json({
+    ok: true,
     integrations: {
       ...it,
-      geminiApiKey: maskSecret(gemini),
-      tavilyApiKey: maskSecret(tavily),
-      serpApiKey: maskSecret(serp),
+      adminPin: undefined, // Never expose actual PIN over the wire!
+      geminiApiKey: isUnlocked ? gemini : maskSecret(gemini),
+      tavilyApiKey: isUnlocked ? tavily : maskSecret(tavily),
+      serpApiKey: isUnlocked ? serp : maskSecret(serp),
       hasGeminiKey: !!gemini,
       hasTavilyKey: !!tavily,
       hasSerpKey: !!serp,
       isEnvGemini: !!process.env.GEMINI_API_KEY,
       isEnvTavily: !!process.env.TAVILY_API_KEY,
-      isEnvSerp: !!process.env.SERPAPI_API_KEY
+      isEnvSerp: !!process.env.SERPAPI_API_KEY,
+      isLocked: !isUnlocked
     }
   });
 });
@@ -829,11 +864,20 @@ app.post("/api/integrations/config", async (req, res) => {
   const b = req.body || {};
   if (!state.integrations) state.integrations = { ...DEFAULT_INTEGRATIONS };
 
+  const isUpdatingKeys = (typeof b.serpApiKey === "string" && b.serpApiKey.trim() && !b.serpApiKey.includes("••••"))
+    || (typeof b.tavilyApiKey === "string" && b.tavilyApiKey.trim() && !b.tavilyApiKey.includes("••••"))
+    || (typeof b.geminiApiKey === "string" && b.geminiApiKey.trim() && !b.geminiApiKey.includes("••••"))
+    || (typeof b.newPin === "string" && b.newPin.trim());
+
+  if (isUpdatingKeys && !checkAdminPin(req)) {
+    return res.status(401).json({ ok: false, error: "Incorrect PIN / Password required to edit API keys" });
+  }
+
   if (typeof b.apiUrl === "string") state.integrations.apiUrl = b.apiUrl.trim();
   if (typeof b.autoPoll === "boolean") state.integrations.autoPoll = b.autoPoll;
   if (typeof b.targetField === "string" && b.targetField.trim()) state.integrations.targetField = b.targetField.trim();
 
-  // Only update keys if non-empty and not masked with bullet dots
+  // Only update keys if authenticated with PIN and not masked with bullet dots
   if (typeof b.serpApiKey === "string" && b.serpApiKey.trim() && !b.serpApiKey.includes("••••")) {
     state.integrations.serpApiKey = b.serpApiKey.trim();
   }
@@ -843,11 +887,15 @@ app.post("/api/integrations/config", async (req, res) => {
   if (typeof b.geminiApiKey === "string" && b.geminiApiKey.trim() && !b.geminiApiKey.includes("••••")) {
     state.integrations.geminiApiKey = b.geminiApiKey.trim();
   }
+  if (typeof b.newPin === "string" && b.newPin.trim()) {
+    state.integrations.adminPin = b.newPin.trim();
+  }
   if (typeof b.geminiModel === "string" && b.geminiModel.trim()) state.integrations.geminiModel = b.geminiModel.trim();
   if (typeof b.prompt === "string" && b.prompt.trim()) state.integrations.prompt = b.prompt.trim();
 
   await saveState();
-  res.json({ ok: true, integrations: state.integrations });
+  const safeIntegrations = { ...state.integrations, adminPin: undefined };
+  res.json({ ok: true, integrations: safeIntegrations });
 });
 
 // Test AI pipeline
@@ -1221,43 +1269,75 @@ app.get("/", (req, res) => {
       <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No peeks grabbed yet. Paste your Inject API URL above to start!</div>
     </div>
 
-    <div class="sec">AI &amp; Search API Keys</div>
-    <div class="card">
-      <div class="subbox">
-        <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
-        <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
-        <div class="row" style="margin-top:8px;">
-          <label style="font-size:13px;">Gemini Model</label>
-          <select id="aiGeminiModel" style="font-size:13px;">
-            <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
-            <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
-            <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
-            <option value="gemini-flash-latest">gemini-flash-latest</option>
-          </select>
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>AI &amp; Search API Keys</span>
+      <span id="aiLockBadge" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">🔒 Locked</span>
+    </div>
+
+    <!-- LOCKED PIN CARD -->
+    <div id="aiKeysLockCard" class="card" style="text-align:center;padding:24px 16px;">
+      <div style="font-size:32px;margin-bottom:8px;">🔒</div>
+      <div style="font-weight:700;font-size:16px;color:#fff;margin-bottom:4px;">Protected API Keys Section</div>
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:16px;max-width:320px;margin-left:auto;margin-right:auto;line-height:1.4;">
+        Enter your Performer PIN or password to view, edit, or configure your API keys.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;max-width:280px;margin:0 auto;">
+        <input type="password" id="adminPinInput" placeholder="PIN / Password" style="text-align:center;font-size:15px;padding:8px 10px;background:#000;color:#fff;border:1px solid #3a3a3c;border-radius:8px;outline:none;">
+        <button type="button" id="unlockKeysBtn" style="background:var(--orange);color:#000;font-weight:700;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;">Unlock</button>
+      </div>
+      <div id="pinErrorMsg" style="color:#ff453a;font-size:12px;margin-top:10px;display:none;font-weight:600;"></div>
+    </div>
+
+    <!-- UNLOCKED SECTION -->
+    <div id="aiKeysUnlockedSection" style="display:none;">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #2c2c2e;">
+          <div style="font-size:12px;color:#30d158;font-weight:600;">🔓 Unlocked for Current Session</div>
+          <button type="button" id="relockKeysBtn" style="background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">🔒 Lock Now</button>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
+          <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
+          <div class="row" style="margin-top:8px;">
+            <label style="font-size:13px;">Gemini Model</label>
+            <select id="aiGeminiModel" style="font-size:13px;">
+              <option value="gemini-3.5-flash" selected>gemini-3.5-flash (Fast &amp; Accurate)</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Ultra-fast)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash)</option>
+              <option value="gemini-flash-latest">gemini-flash-latest</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
+          <input type="password" id="aiTavilyKey" placeholder="tvly-...">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
+          <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
+        </div>
+
+        <div class="subbox" style="margin-top:12px;border-top:1px dashed #3a3a3c;padding-top:12px;">
+          <div class="subhead">Change Performer PIN / Password</div>
+          <input type="password" id="aiNewPin" placeholder="Enter new PIN / password">
+          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Set a custom PIN to protect your API keys. Leave blank to keep current PIN.</div>
         </div>
       </div>
 
-      <div class="subbox">
-        <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
-        <input type="password" id="aiTavilyKey" placeholder="tvly-...">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+      <div class="sec">AI Price Estimation Prompt</div>
+      <div class="card">
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
+        <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
+        <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
       </div>
 
-      <div class="subbox">
-        <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
-        <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
-      </div>
+      <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
     </div>
-
-    <div class="sec">AI Price Estimation Prompt</div>
-    <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
-      <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
-      <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
-    </div>
-
-    <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
 
     <div class="sec">Live Test Runner &amp; Pipeline Verifier</div>
     <div class="card">
@@ -1657,9 +1737,103 @@ document.getElementById("resetAllDefaultsBtn").onclick = async () => {
 
 const DEFAULT_AI_PROMPT = "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.";
 
+let currentSessionPin = sessionStorage.getItem("smartcalc_admin_pin") || "";
+
+function updateLockUI(isUnlocked) {
+  const lockCard = document.getElementById("aiKeysLockCard");
+  const unlockedSection = document.getElementById("aiKeysUnlockedSection");
+  const lockBadge = document.getElementById("aiLockBadge");
+
+  if (!lockCard || !unlockedSection) return;
+
+  if (isUnlocked) {
+    lockCard.style.display = "none";
+    unlockedSection.style.display = "block";
+    if (lockBadge) {
+      lockBadge.textContent = "🔓 Unlocked";
+      lockBadge.style.background = "#111c14";
+      lockBadge.style.color = "#30d158";
+    }
+  } else {
+    lockCard.style.display = "block";
+    unlockedSection.style.display = "none";
+    if (lockBadge) {
+      lockBadge.textContent = "🔒 Locked";
+      lockBadge.style.background = "#2c2c2e";
+      lockBadge.style.color = "#8e8e93";
+    }
+  }
+}
+
+async function unlockKeysWithPin(pinToTry) {
+  const errEl = document.getElementById("pinErrorMsg");
+  if (errEl) errEl.style.display = "none";
+  try {
+    const res = await fetch("/api/integrations/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pinToTry })
+    });
+    const data = await res.json();
+    if (data.ok && data.unlocked) {
+      currentSessionPin = pinToTry;
+      sessionStorage.setItem("smartcalc_admin_pin", currentSessionPin);
+      updateLockUI(true);
+      if (data.keys) {
+        if (data.keys.geminiApiKey) document.getElementById("aiGeminiKey").value = data.keys.geminiApiKey;
+        if (data.keys.tavilyApiKey) document.getElementById("aiTavilyKey").value = data.keys.tavilyApiKey;
+        if (data.keys.serpApiKey) document.getElementById("aiSerpKey").value = data.keys.serpApiKey;
+      }
+      flashToast("API Keys Unlocked!");
+      return true;
+    } else {
+      if (errEl) {
+        errEl.textContent = data.error || "Incorrect PIN";
+        errEl.style.display = "block";
+      }
+      return false;
+    }
+  } catch(e) {
+    if (errEl) {
+      errEl.textContent = "Unlock failed: " + e.message;
+      errEl.style.display = "block";
+    }
+    return false;
+  }
+}
+
+document.getElementById("unlockKeysBtn").onclick = () => {
+  const pin = (document.getElementById("adminPinInput").value || "").trim();
+  if (!pin) {
+    flashToast("Please enter your PIN");
+    return;
+  }
+  unlockKeysWithPin(pin);
+};
+
+document.getElementById("adminPinInput").onkeydown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("unlockKeysBtn").click();
+  }
+};
+
+document.getElementById("relockKeysBtn").onclick = () => {
+  currentSessionPin = "";
+  sessionStorage.removeItem("smartcalc_admin_pin");
+  document.getElementById("adminPinInput").value = "";
+  document.getElementById("aiGeminiKey").value = "";
+  document.getElementById("aiTavilyKey").value = "";
+  document.getElementById("aiSerpKey").value = "";
+  updateLockUI(false);
+  flashToast("API Keys Locked!");
+};
+
 async function loadIntegrationsConfig(){
   try {
-    const r = await fetch("/api/integrations/config", { cache: "no-store" });
+    const headers = {};
+    if (currentSessionPin) headers["x-admin-pin"] = currentSessionPin;
+    const r = await fetch("/api/integrations/config", { headers, cache: "no-store" });
     const d = await r.json();
     if (d && d.integrations){
       const it = d.integrations;
@@ -1667,11 +1841,17 @@ async function loadIntegrationsConfig(){
       const ap = document.getElementById("aiAutoPoll");
       if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
-      document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
       document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-3.5-flash";
-      document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
-      document.getElementById("aiSerpKey").value = it.serpApiKey || "";
       document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
+
+      if (!it.isLocked) {
+        updateLockUI(true);
+        document.getElementById("aiGeminiKey").value = it.geminiApiKey || "";
+        document.getElementById("aiTavilyKey").value = it.tavilyApiKey || "";
+        document.getElementById("aiSerpKey").value = it.serpApiKey || "";
+      } else {
+        updateLockUI(false);
+      }
 
       renderAiLogs(it.lastLogs);
     }
@@ -1768,8 +1948,10 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
   const gemVal = document.getElementById("aiGeminiKey").value.trim();
   const tavVal = document.getElementById("aiTavilyKey").value.trim();
   const serpVal = document.getElementById("aiSerpKey").value.trim();
+  const newPinVal = (document.getElementById("aiNewPin").value || "").trim();
 
   const body = {
+    pin: currentSessionPin,
     apiUrl: document.getElementById("aiApiUrl").value.trim(),
     autoPoll: true,
     targetField: document.getElementById("aiTargetField").value.trim() || "data",
@@ -1780,22 +1962,30 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
   if (gemVal && !gemVal.includes("••••")) body.geminiApiKey = gemVal;
   if (tavVal && !tavVal.includes("••••")) body.tavilyApiKey = tavVal;
   if (serpVal && !serpVal.includes("••••")) body.serpApiKey = serpVal;
+  if (newPinVal) body.newPin = newPinVal;
 
   try {
     const res = await fetch("/api/integrations/config", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-admin-pin": currentSessionPin },
       body: JSON.stringify(body)
     });
     const data = await res.json();
     if (data.ok) {
-      flashToast("Inject API & AI Keys Saved!");
+      if (newPinVal) {
+        currentSessionPin = newPinVal;
+        sessionStorage.setItem("smartcalc_admin_pin", currentSessionPin);
+        document.getElementById("aiNewPin").value = "";
+        flashToast("Keys & New PIN Saved!");
+      } else {
+        flashToast("Inject API & AI Keys Saved!");
+      }
       loadIntegrationsConfig();
     } else {
-      flashToast("Error saving config");
+      flashToast("Error: " + (data.error || "Save failed"));
     }
   } catch(e){
-    flashToast("Save failed");
+    flashToast("Save failed: " + e.message);
   }
 };
 
