@@ -511,8 +511,8 @@ app.post("/api/calc/heartbeat", (req, res) => {
     if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
     state.calc.battery = Number(req.body.battery);
   }
-  const spectatorConnected = (now - lastCalcHeartbeatAt) < 5500;
-  const controllerConnected = (now - lastControllerHeartbeatAt) < 5500;
+  const spectatorConnected = (now - lastCalcHeartbeatAt) < 15000;
+  const controllerConnected = (now - lastControllerHeartbeatAt) < 15000;
   res.json({
     ok: true,
     now,
@@ -605,8 +605,8 @@ app.get("/api/calc/mirror", (req, res) => {
     mirror: state.calc?.mirror || { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "" },
     daysAlive: state.calc?.daysAlive || {},
     bdayResetAt: state.calc?.bdayResetAt || 0,
-    spectatorConnected: (Date.now() - lastCalcHeartbeatAt) < 5500,
-    controllerConnected: (Date.now() - lastControllerHeartbeatAt) < 5500
+    spectatorConnected: (Date.now() - lastCalcHeartbeatAt) < 15000,
+    controllerConnected: (Date.now() - lastControllerHeartbeatAt) < 15000
   });
 });
 
