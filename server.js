@@ -1335,55 +1335,68 @@ app.get("/", (req, res) => {
   <!-- CALCULATOR PANE -->
   <div class="pane" id="paneCalc">
     <!-- COVERT HEARTBEAT & LIVE MIRROR CARD -->
-    <div class="card" style="background:#13151b;border:1px solid #ff9f0a;border-radius:12px;padding:14px;margin-bottom:12px;">
+    <div class="card" style="background:#13151b;border:1.5px solid #ff9f0a;border-radius:12px;padding:14px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <div id="calcSignalBars" style="display:inline-flex;align-items:flex-end;gap:2px;height:12px;">
-            <span class="cbar cb1" style="width:3px;height:4px;background:#30d158;border-radius:1px;"></span>
-            <span class="cbar cb2" style="width:3px;height:6.5px;background:#30d158;border-radius:1px;"></span>
-            <span class="cbar cb3" style="width:3px;height:9px;background:#30d158;border-radius:1px;"></span>
-            <span class="cbar cb4" style="width:3px;height:12px;background:#30d158;border-radius:1px;"></span>
-          </div>
+          <!-- Cellular 4-bar indicator on Controller -->
+          <svg id="calcSignalBars" viewBox="0 0 17 12" style="width:17px;height:12px;" fill="none">
+            <rect x="0" y="8" width="3" height="4" rx="0.8" class="cbar cb1" style="fill:#30d158;"/>
+            <rect x="4.6" y="5.5" width="3" height="6.5" rx="0.8" class="cbar cb2" style="fill:#30d158;"/>
+            <rect x="9.3" y="3" width="3" height="9" rx="0.8" class="cbar cb3" style="fill:#30d158;"/>
+            <rect x="14" y="0" width="3" height="12" rx="0.8" class="cbar cb4" style="fill:#30d158;"/>
+          </svg>
           <span style="font-size:11px;font-weight:700;color:#ff9f0a;text-transform:uppercase;letter-spacing:0.05em;">
-            5G Heartbeat &amp; Keystroke Mirror
+            Heartbeat &amp; Keystroke Mirror
           </span>
         </div>
         <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
       </div>
 
-      <!-- LIVE MIRROR DISPLAY -->
+      <!-- ROLE BANNER: WHO IS SENDING VS RECEIVING -->
+      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
+          <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
+            📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+          </div>
+        </div>
+        <button type="button" id="toggleMirrorDirBtn" style="background:#ff9f0a;color:#000;border:0;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;">
+          ⇄ Switch Direction
+        </button>
+      </div>
+
+      <!-- LIVE MIRROR DISPLAY SCREEN -->
       <div style="background:#000;border:1px solid #2c2c2e;border-radius:10px;padding:12px;text-align:right;">
-        <div style="font-size:10px;color:#636366;text-transform:uppercase;letter-spacing:0.05em;float:left;">Spectator Screen Mirror</div>
+        <div style="font-size:10px;color:#636366;text-transform:uppercase;letter-spacing:0.05em;float:left;">Live Spectator Screen</div>
         <div id="mirrorExprDisp" style="font-size:13px;color:#8e8e93;min-height:16px;"></div>
         <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #2c2c2e;">
         <span id="mirrorLastKeyDisp" style="font-size:11px;color:#8e8e93;font-family:ui-monospace,monospace;">Last Key: None</span>
-        <button type="button" id="toggleMirrorDirBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">
-          Direction: Spectator → Magician
-        </button>
+        <span id="mirrorLastSeen" style="font-size:11px;color:#636366;">Heartbeat: Waiting</span>
       </div>
     </div>
 
     <!-- DAYS ALIVE SIRI BIRTHDAY ROUTINE CARD -->
-    <div class="card" style="background:#13151b;border:1px solid #30d158;border-radius:12px;padding:14px;margin-bottom:12px;">
+    <div class="card" style="background:#13151b;border:1.5px solid #30d158;border-radius:12px;padding:14px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <div style="font-size:11px;font-weight:700;color:#30d158;text-transform:uppercase;letter-spacing:0.05em;">
           🎂 "Days Alive" Siri Birthday Routine
         </div>
-        <span id="daysAliveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Ready</span>
+        <span id="daysAliveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Waiting for Date...</span>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Spectator Born On</div>
-          <div id="daysAliveDate" style="font-size:18px;font-weight:700;color:#fff;margin-top:2px;">Waiting for birthday math...</div>
-          <div id="daysAliveMeta" style="font-size:12px;color:#636366;margin-top:2px;">(Spectator types Month × Day × Year)</div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Day of Week Born</div>
+          <div id="daysAliveDow" style="font-size:28px;font-weight:900;color:#30d158;letter-spacing:0.02em;line-height:1.1;margin-top:2px;">—</div>
+          <div id="daysAliveDate" style="font-size:14px;color:#fff;font-weight:600;margin-top:4px;">No birthday entered yet</div>
+          <div id="daysAliveMeta" style="font-size:11px;color:#636366;margin-top:2px;">(Spectator types Month × Day × Year)</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Days Alive</div>
-          <div id="daysAliveNum" style="font-size:32px;font-weight:800;color:#30d158;font-variant-numeric:tabular-nums;line-height:1.1;">—</div>
+          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Total Days Alive</div>
+          <div id="daysAliveNum" style="font-size:32px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1;">—</div>
         </div>
       </div>
 
@@ -1391,7 +1404,7 @@ app.get("/", (req, res) => {
         <div style="font-size:11px;color:#8e8e93;">
           <strong style="color:#fff;">Siri Prompt:</strong> <span id="siriPromptText">"Hey Siri, how many days ago was [Date]?"</span>
         </div>
-        <button type="button" id="forceDaysAliveBtn" style="background:#30d158;color:#000;border:0;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">
+        <button type="button" id="forceDaysAliveBtn" style="background:#30d158;color:#000;border:0;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">
           Force on Calc
         </button>
       </div>
@@ -1928,7 +1941,8 @@ async function loadCalc(onlyMirror){
     const mirPrim = document.getElementById("mirrorPrimaryDisp");
     const mirExpr = document.getElementById("mirrorExprDisp");
     const mirKey = document.getElementById("mirrorLastKeyDisp");
-    const mirBtn = document.getElementById("toggleMirrorDirBtn");
+    const mirRoleTxt = document.getElementById("mirrorRoleText");
+    const mirLastSeen = document.getElementById("mirrorLastSeen");
 
     if (mirPrim && mir.display !== undefined) mirPrim.textContent = mir.display || "0";
     if (mirExpr && mir.expr !== undefined) mirExpr.textContent = mir.expr || "";
@@ -1939,29 +1953,42 @@ async function loadCalc(onlyMirror){
         if (navigator.vibrate) try { navigator.vibrate(25); } catch(_) {}
       }
     }
-    if (mirBtn && mir.direction) {
-      mirBtn.textContent = (mir.direction === "spectator-to-magician")
-        ? "Direction: Spectator → Magician"
-        : "Direction: Magician → Spectator (Dan White)";
+    if (mirLastSeen) {
+      mirLastSeen.textContent = hbData.spectatorConnected ? "Spectator: Online" : "Spectator: Idle/Offline";
+      mirLastSeen.style.color = hbData.spectatorConnected ? "#30d158" : "#8e8e93";
+    }
+    if (mirRoleTxt && mir.direction) {
+      if (mir.direction === "spectator-to-magician") {
+        mirRoleTxt.textContent = "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
+        mirRoleTxt.style.color = "#30d158";
+      } else {
+        mirRoleTxt.textContent = "📲 DAN WHITE MODE: CONTROLLER SENDS → SPECTATOR RECEIVES";
+        mirRoleTxt.style.color = "#ff9f0a";
+      }
     }
 
     // Days Alive update
     const mRes = await fetch("/api/calc/mirror", { cache: "no-store" });
     const mData = await mRes.json();
     const da = mData.daysAlive;
-    if (da && da.daysAlive) {
+    if (da && da.date) {
       const daDate = document.getElementById("daysAliveDate");
+      const daDow = document.getElementById("daysAliveDow");
       const daMeta = document.getElementById("daysAliveMeta");
       const daNum = document.getElementById("daysAliveNum");
       const daBadge = document.getElementById("daysAliveBadge");
       const siriPrompt = document.getElementById("siriPromptText");
 
-      if (daDate) daDate.textContent = da.date + " (" + da.dayOfWeek + ")";
+      if (daDate) daDate.textContent = "Date: " + da.date;
+      if (daDow) {
+        daDow.textContent = (da.dayOfWeek || "Unknown").toUpperCase();
+        daDow.style.color = "#30d158";
+      }
       const dayIdx = (da.dayOfWeek === "Sunday") ? 7 : (["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].indexOf(da.dayOfWeek) + 1);
-      if (daMeta) daMeta.textContent = "Keypad Cue: " + da.dayOfWeek + " (Key " + dayIdx + ")";
-      if (daNum) daNum.textContent = Number(da.daysAlive).toLocaleString();
+      if (daMeta) daMeta.textContent = "Day Key: " + da.dayOfWeek + " (Key " + dayIdx + ")";
+      if (daNum) daNum.textContent = Number(da.daysAlive || 0).toLocaleString() + " Days";
       if (daBadge) {
-        daBadge.textContent = "✓ CAPTURED";
+        daBadge.textContent = "✓ BORN ON " + (da.dayOfWeek || "").toUpperCase();
         daBadge.style.background = "rgba(48,209,88,0.2)";
         daBadge.style.color = "#30d158";
       }
@@ -1973,9 +2000,11 @@ async function loadCalc(onlyMirror){
 loadSw(false);
 loadCalc(false);
 setInterval(() => {
-  loadSw(true);
   loadCalc(true);
-}, 1500);
+}, 450);
+setInterval(() => {
+  loadSw(true);
+}, 1400);
 
 const togMirBtn = document.getElementById("toggleMirrorDirBtn");
 if (togMirBtn) {
