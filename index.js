@@ -31,7 +31,9 @@ const DEFAULT_SW_MODES = {
   targets: [18, 23, 27, 41, 56, 9],
   scrambleLotto: true,
   triggerOn: "both",
-  autoDisarm: true
+  autoDisarm: true,
+  emergenceCount: 3,
+  emergenceLocked: false
 };
 
 const DEFAULT_CALC_MODES = {
@@ -370,6 +372,10 @@ app.post("/api/acaat", async (req, res) => {
   }
   if (["both", "stop", "lap"].includes(b.triggerOn)) state.acaat.triggerOn = b.triggerOn;
   if (typeof b.autoDisarm === "boolean") state.acaat.autoDisarm = b.autoDisarm;
+  if (b.emergenceCount !== undefined && !isNaN(Number(b.emergenceCount))) {
+    state.acaat.emergenceCount = Math.max(2, Math.min(10, Math.floor(Number(b.emergenceCount))));
+  }
+  if (typeof b.emergenceLocked === "boolean") state.acaat.emergenceLocked = b.emergenceLocked;
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.acaat.updatedAt = Date.now();
   await saveState();
@@ -388,23 +394,37 @@ app.post("/api/acaat/peek", (req, res) => {
     cs: Number(b.cs ?? b.realCs) || 0,
     at: b.at || new Date().toLocaleTimeString()
   };
-  if (entry.type.startsWith("RESET")) {
-    const rawSlots = String(b.emergenceSlots || b.realFormatted || shownFmt);
-    const parts = rawSlots.split("—").map(s => s.trim()).filter(Boolean);
-    if (parts.length > 0) {
-      state.emergence = parts.map(fmt => {
-        const cleanFmt = fmt.replace(/\s*\(.*$/, "").trim();
-        return {
-          formatted: cleanFmt,
-          largeInt: parseInt(cleanFmt.replace(/[^0-9]/g, ""), 10) || 0
-        };
-      });
+  if (entry.type.startsWith("RESET") || entry.type.startsWith("EMERGENCE")) {
+    if (Array.isArray(b.emergenceList) && b.emergenceList.length > 0) {
+      state.emergence = b.emergenceList.map(it => ({
+        formatted: String(it.formatted || "").replace(/\s*\(.*$/, "").trim(),
+        largeInt: Number(it.largeInt) || parseInt(String(it.formatted || "").replace(/[^0-9]/g, ""), 10) || 0
+      }));
+    } else {
+      const rawSlots = String(b.emergenceSlots || b.realFormatted || shownFmt);
+      const parts = rawSlots.split(/[—–-]/).map(s => s.trim()).filter(Boolean);
+      if (parts.length > 0) {
+        state.emergence = parts.map(fmt => {
+          const cleanFmt = fmt.replace(/\s*\(.*$/, "").trim();
+          return {
+            formatted: cleanFmt,
+            largeInt: parseInt(cleanFmt.replace(/[^0-9]/g, ""), 10) || 0
+          };
+        });
+      }
     }
   }
   state.peeks.unshift(entry);
   if (state.peeks.length > 20) state.peeks.pop();
   saveState();
   res.json({ ok: true });
+});
+
+app.post("/api/acaat/reset-emergence", async (req, res) => {
+  state.emergence = [];
+  if (state.acaat) state.acaat.emergenceLocked = false;
+  await saveState();
+  res.json({ ok: true, emergence: [] });
 });
 
 app.get("/healthz", (req, res) => res.json({ status: "ok", now: Date.now() }));
@@ -1034,33 +1054,60 @@ app.get("/", (req, res) => {
 
   <!-- STOPWATCH PANE -->
   <div class="pane on" id="paneSw">
-    <div class="sec">Live Spectator Peek (Auto-Updates)</div>
-    <div class="card">
-      <div class="peek-hero" style="margin-bottom:8px;">
+    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Emergence &amp; Live Peeks</span>
+      <span id="emStatusBadge" style="font-size:11px;color:var(--orange);font-weight:700;text-transform:uppercase;">0 of 3 Locked</span>
+    </div>
+    <div class="card" style="padding:14px;">
+      <!-- TOP: EMERGENCE TOTAL -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid #2c2c2e;">
         <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">3-Person Reset Sum (Emergence)</div>
-          <div class="peek-big" id="emSum">—</div>
-          <div class="peek-meta" id="emSlots" style="margin-top:2px;">No Reset times locked yet</div>
+          <div style="font-size:11px;color:#8e8e93;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">Emergence Total</div>
+          <div id="emSum" style="font-size:38px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px;">—</div>
         </div>
-        <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Force on Calc</button>
-      </div>
-      <div class="peek-hero">
-        <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">What Spectator Sees On Screen</div>
-          <div class="peek-big" id="liveShown" style="font-size:22px;color:#fff;">—</div>
-        </div>
-        <div style="text-align:right;">
-          <div class="peek-meta" id="liveInt">Number: —</div>
-          <div class="peek-meta" id="liveBreakdown">Sec: — | Dec: —</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+          <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">Force on Calc</button>
+          <button type="button" id="resetEmergenceBtn" style="background:#2c2c2e;color:#8e8e93;border:1px solid #3a3a3c;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Reset Round</button>
         </div>
       </div>
-      <div class="peek-list" id="peekLog">Waiting for spectator stops...</div>
-      <button type="button" id="clearPeeksBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Clear Peek History</button>
+
+      <!-- ONE PER LINE EMERGENCE BREAKDOWN -->
+      <div id="emLinesList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+        <div style="font-size:12px;color:#636366;font-style:italic;">No Reset times locked yet</div>
+      </div>
+
+      <!-- COMPACT LAST STOP STRIP -->
+      <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #2c2c2e;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12px;color:#8e8e93;">Latest Stop:</span>
+        <span id="liveShown" style="font-size:15px;font-weight:700;color:#fff;font-family:ui-monospace,monospace;">—</span>
+      </div>
+
+      <!-- COLLAPSIBLE PEEK LOG -->
+      <details style="margin-top:8px;">
+        <summary style="font-size:11px;color:#636366;cursor:pointer;user-select:none;">View Raw Logs &amp; Peeks</summary>
+        <div class="peek-list" id="peekLog" style="margin-top:6px;max-height:85px;font-size:11px;">Waiting for stops...</div>
+        <button type="button" id="clearPeeksBtn" style="margin-top:6px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;">Clear Logs</button>
+      </details>
     </div>
 
     <div class="sec">Stopwatch Force Controls (Tap Mode to Switch Live)</div>
     <div class="card">
       <button type="button" id="resetSwModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Stopwatch Modes to Default (Keeps Redirects)</button>
+
+      <!-- Configurable Emergence People Count -->
+      <div style="margin-bottom:14px;background:#18191f;border:1px solid #2c2c2e;border-radius:10px;padding:10px 12px;">
+        <div class="row" style="margin-bottom:6px;">
+          <label style="font-weight:600;">Emergence People Count</label>
+          <span id="emCountLabel" style="font-size:12px;color:var(--orange);font-weight:700;">3 Spectators</span>
+        </div>
+        <div class="mode-pills" id="emCountPills" style="grid-template-columns:repeat(4,1fr);">
+          <button type="button" class="mpill" data-count="2">2 People</button>
+          <button type="button" class="mpill sel" data-count="3">3 People</button>
+          <button type="button" class="mpill" data-count="4">4 People</button>
+          <button type="button" class="mpill" data-count="5">5 People</button>
+        </div>
+      </div>
+
       <div class="mode-pills" id="swModePills">
         <button type="button" class="mpill sel" data-mode="seq">Lotto 6-Seq</button>
         <button type="button" class="mpill" data-mode="single">Single .XX</button>
@@ -1539,30 +1586,71 @@ async function loadSw(onlyPeeks){
       document.getElementById("swIcontrolSafari").checked = (d.icontrolOpenSafari !== false);
       renderSavedSitesUI();
     }
+    const emCount = d.emergenceCount || 3;
+    const emPill = document.querySelector(\`#emCountPills .mpill[data-count="\${emCount}"]\`);
+    if (emPill) {
+      document.querySelectorAll("#emCountPills .mpill").forEach(b => b.classList.toggle("sel", b === emPill));
+      const lbl = document.getElementById("emCountLabel");
+      if (lbl) lbl.textContent = \`\${emCount} Spectators\`;
+    }
+
     const em = d.emergence || [];
-    if (em.length){
+    const emLinesEl = document.getElementById("emLinesList");
+    const emBadge = document.getElementById("emStatusBadge");
+
+    if (emLinesEl) {
+      let html = "";
+      for (let i = 0; i < emCount; i++) {
+        const slot = em[i];
+        if (slot) {
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:#18191f;border:1px solid #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
+            <span style="font-weight:700;color:#ff9f0a;font-size:13px;">Person \${i+1}</span>
+            <div style="display:flex;gap:12px;align-items:center;">
+              <span style="color:#8e8e93;font-size:13px;">\${slot.formatted}</span>
+              <span style="color:#30d158;font-size:16px;font-weight:800;">\${slot.largeInt}</span>
+            </div>
+          </div>\`;
+        } else {
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02);border:1px dashed #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
+            <span style="color:#636366;font-size:13px;">Person \${i+1}</span>
+            <span style="color:#48484a;font-size:12px;font-style:italic;">Waiting for stop...</span>
+          </div>\`;
+        }
+      }
+      emLinesEl.innerHTML = html;
+    }
+
+    if (em.length) {
       const sum = em.reduce((acc, it) => acc + (Number(it.largeInt) || 0), 0);
       latestEmSum = sum;
       document.getElementById("emSum").textContent = String(sum);
-      document.getElementById("emSlots").textContent = em.map((it, idx) => \`#\${idx+1}: \${it.formatted} (\${it.largeInt})\`).join("  •  ");
+      if (emBadge) {
+        if (em.length >= emCount) {
+          emBadge.textContent = \`✓ ALL \${emCount} LOCKED\`;
+          emBadge.style.color = "#30d158";
+        } else {
+          emBadge.textContent = \`\${em.length} OF \${emCount} LOCKED\`;
+          emBadge.style.color = "#ff9f0a";
+        }
+      }
     } else {
       latestEmSum = 0;
       document.getElementById("emSum").textContent = "—";
-      document.getElementById("emSlots").textContent = "No Reset times locked yet";
+      if (emBadge) {
+        emBadge.textContent = \`0 OF \${emCount} LOCKED\`;
+        emBadge.style.color = "#8e8e93";
+      }
     }
+
     const peeks = d.peeks || [];
-    if (peeks.length){
+    if (peeks.length) {
       const latest = peeks[0];
-      document.getElementById("liveShown").textContent = latest.shownFormatted;
-      document.getElementById("liveInt").textContent = \`Number: \${latest.largeInt ?? ""}\`;
-      document.getElementById("liveBreakdown").textContent = \`Sec: \${latest.sec ?? 0} | Dec: .\${p2(latest.cs ?? 0)}\`;
+      document.getElementById("liveShown").textContent = \`\${latest.shownFormatted} (\${latest.largeInt ?? ""})\`;
       document.getElementById("peekLog").textContent = peeks.map(
         p => \`[\${p.at}] \${p.type}: \${p.shownFormatted} (\${p.largeInt ?? ""})\`
       ).join("\\n");
     } else {
       document.getElementById("liveShown").textContent = "—";
-      document.getElementById("liveInt").textContent = "Number: —";
-      document.getElementById("liveBreakdown").textContent = "Sec: — | Dec: —";
       document.getElementById("peekLog").textContent = "Waiting for spectator stops...";
     }
   } catch(e){}
@@ -1703,6 +1791,37 @@ document.getElementById("pushSumToCalcBtn").onclick = async () => {
   syncCalcPills();
   await pushCalcNow("Calc Fixed Set to " + latestEmSum + "!");
 };
+
+const rstEmBtn = document.getElementById("resetEmergenceBtn");
+if (rstEmBtn) {
+  rstEmBtn.onclick = async () => {
+    try {
+      await fetch("/api/acaat/reset-emergence", { method: "POST" });
+      flashToast("Emergence Round Reset!");
+      loadSw(true);
+    } catch(e) {
+      flashToast("Reset Failed");
+    }
+  };
+}
+
+document.querySelectorAll("#emCountPills .mpill").forEach(b => {
+  b.onclick = async () => {
+    const count = Number(b.dataset.count);
+    document.querySelectorAll("#emCountPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
+    const lbl = document.getElementById("emCountLabel");
+    if (lbl) lbl.textContent = `${count} Spectators`;
+    try {
+      await fetch("/api/acaat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emergenceCount: count })
+      });
+      flashToast(`Emergence set to ${count} people!`);
+      loadSw(true);
+    } catch(e) {}
+  };
+});
 
 document.getElementById("saveSwBtn").onclick = () => pushSwNow("Stopwatch Updated Live!");
 
