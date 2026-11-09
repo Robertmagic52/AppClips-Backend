@@ -534,7 +534,7 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.expr = "";
     state.calc.mirror.lastKey = "clear";
     state.calc.mirror.updatedAt = Date.now();
-    state.calc.daysAlive = {};
+    // Do NOT wipe daysAlive on normal clear so spectator info persists across clears!
     if (b.fromController) {
       state.calc.mirror.controllerKey = {
         key: "clear",
@@ -546,7 +546,7 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
       lastCalcHeartbeatAt = Date.now();
     }
     saveState().catch(() => {});
-    return res.json({ ok: true, mirror: state.calc.mirror, daysAlive: {} });
+    return res.json({ ok: true, mirror: state.calc.mirror, daysAlive: state.calc.daysAlive || {} });
   }
 
   if (b.fromController) {
