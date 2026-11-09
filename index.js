@@ -13,7 +13,9 @@ const DATA_FILE = path.join(__dirname, "state.json");
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
+app.use(express.text({ type: ["text/*", "application/javascript", "*/*"], limit: "5mb" }));
 
 const DEFAULT_SAVED_SITES = [
   { name: "Built-in 3D Dice Roller", url: "dice", openInSafari: false },
@@ -44,7 +46,7 @@ const DEFAULT_CALC_MODES = {
 
 const DEFAULT_INTEGRATIONS = {
   enabled: true,
-  autoPoll: true,
+  autoPoll: false,
   apiUrl: "",
   targetField: "data",
   serpApiKey: "",
@@ -475,6 +477,19 @@ function resolvePayloadInput(body, query, targetField) {
     }
     if (query && typeof query === "object" && query[f] !== undefined && String(query[f]).trim()) {
       return String(query[f]).trim();
+    }
+  }
+
+  if (body && typeof body === "object") {
+    for (const k of Object.keys(body)) {
+      const v = body[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  if (query && typeof query === "object") {
+    for (const k of Object.keys(query)) {
+      const v = query[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
     }
   }
 
@@ -1098,45 +1113,68 @@ app.get("/", (req, res) => {
 
   <!-- AI & INJECT INTEGRATIONS PANE -->
   <div class="pane" id="paneAi">
-    <div class="sec">Inject API &amp; AI Price Pipeline</div>
+    <div class="sec">Incoming Inject Webhook (Primary Setup)</div>
     <div class="card">
       <div style="font-size:13px;color:#a1a1a6;margin-bottom:12px;line-height:1.4;">
-        Connect your <b>Inject API</b>. SmartCalc receives the spectator's peek/search from Inject, prompts AI to determine the realistic price, and sets the answer as the forced number on the calculator automatically.
+        Inject sends spectator searches <b>incoming to SmartCalc</b>. In your Inject app's Webhook settings, paste this Webhook URL:
       </div>
 
+      <div class="subbox" style="background:#0d1117;border:1.5px solid #1e4628;">
+        <div class="subhead" style="color:#30d158;display:flex;justify-content:space-between;align-items:center;">
+          <span>⚡ SmartCalc Webhook URL (Paste into Inject)</span>
+          <button type="button" id="copyWebhookBtn" style="background:#238636;color:#fff;border:0;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">📋 Copy Webhook URL</button>
+        </div>
+        <input type="text" id="aiWebhookUrl" readonly value="https://smartcalc-backend-el0f.onrender.com/api/inject" style="font-family:ui-monospace,monospace;font-size:12.5px;color:#30d158;background:#000;border:1px solid #1e4628;margin-top:6px;padding:8px 10px;">
+        <div style="font-size:11px;color:#8e8e93;margin-top:6px;line-height:1.3;">
+          Paste this exact URL into <b>Inject &gt; Settings &gt; Webhooks</b>. Whenever a spectator searches in Inject, Inject fires an incoming request directly here!
+        </div>
+      </div>
+
+      <div class="subbox" style="margin-top:12px;">
+        <div class="subhead">Data Field to Read from Inject (Optional)</div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="aiTargetField" placeholder="data (e.g. data, text, query, peek)" value="data" style="flex:1;">
+          <button type="button" id="saveTargetFieldBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 12px;font-size:11px;font-weight:700;cursor:pointer;">💾 Save Field</button>
+        </div>
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the item name (defaults to <code>data</code> in Inject, with auto-detection for <code>query</code>, <code>text</code>, <code>peek</code>, <code>search</code>, or raw text).</div>
+      </div>
+
+      <div class="subbox" style="margin-top:12px;background:#161b22;border:1px dashed #30363d;">
+        <div class="subhead" style="color:#ff9f0a;">
+          <span>🧪 Test Incoming Inject Webhook</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <input type="text" id="aiSimulateInput" placeholder="e.g. Rolex Submariner or 1968 Gibson Les Paul" value="Rolex Submariner" style="flex:1;font-size:13px;">
+          <button type="button" id="sendSimulatedWebhookBtn" style="background:#ff9f0a;color:#000;border:0;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">⚡ Test Inbound</button>
+        </div>
+        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Simulates Inject firing an incoming webhook with this peek to verify that AI prices it and arms SmartCalc!</div>
+      </div>
+    </div>
+
+    <div class="sec">Live Inbound Webhook Activity Log</div>
+    <div class="card">
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Real-time feed of spectator peeks received from Inject:</div>
+      <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No incoming webhooks yet. Paste the Webhook URL into Inject to start!</div>
+    </div>
+
+    <div class="sec">Outbound Inject API Poller (Optional / Advanced)</div>
+    <div class="card">
+      <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;">
+        Only use this if your setup requires SmartCalc to actively poll an external API endpoint instead of receiving incoming webhooks.
+      </div>
       <div class="subbox">
         <div class="subhead">
-          <span>Your Inject API URL</span>
+          <span>External API URL to Poll</span>
           <div style="display:flex;gap:6px;">
             <button type="button" id="saveApiUrlBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">💾 Save</button>
-            <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Fetch From Inject Now</button>
+            <button type="button" id="pollApiNowBtn" style="background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Poll Now</button>
           </div>
         </div>
-        <input type="url" id="aiApiUrl" placeholder="https://... (Paste your Inject API / Webhook URL here)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;">
-        <div style="font-size:11px;color:#8e8e93;margin-top:5px;">Paste your Inject API endpoint here. SmartCalc reads the spectator's peek directly from this URL.</div>
+        <input type="url" id="aiApiUrl" placeholder="https://... (Leave blank if using incoming webhooks above)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;">
       </div>
-
       <div class="row" style="margin-top:10px;">
-        <label style="font-size:14px;font-weight:600;">Auto-Poll Inject API Continuously</label>
-        <input id="aiAutoPoll" type="checkbox" checked style="width:22px;height:22px;accent-color:var(--orange);">
-      </div>
-      <div style="font-size:11px;color:#8e8e93;margin-top:-6px;margin-bottom:10px;">
-        When enabled, SmartCalc automatically checks your Inject API every 2.5s. As soon as a spectator searches, AI prices it and arms the calculator automatically!
-      </div>
-
-      <div class="subbox">
-        <div class="subhead">Field to Read in Inject JSON (Optional)</div>
-        <input type="text" id="aiTargetField" placeholder="data (e.g. data, text, query, peek)" value="data">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the item name (defaults to <code>data</code>, with auto-detection for <code>text</code>, <code>search</code>, <code>query</code>, <code>peek</code>, or raw text).</div>
-      </div>
-
-      <div class="subbox" style="margin-top:10px;background:#0d1117;border-color:#1e4628;">
-        <div class="subhead" style="color:#30d158;">
-          <span>SmartCalc Receiver Endpoint (Optional Inbound)</span>
-          <button type="button" id="copyWebhookBtn" style="background:#2c2c2e;color:#30d158;border:1px solid #30d158;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer;">Copy</button>
-        </div>
-        <input type="text" id="aiWebhookUrl" readonly value="https://smartcalc-backend-el0f.onrender.com/api/inject" style="font-family:ui-monospace,monospace;font-size:11px;color:#8e8e93;background:#000;">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">If your Inject or Shortcut pushes directly instead of polling, send HTTP POST to this endpoint.</div>
+        <label style="font-size:14px;font-weight:600;">Auto-Poll Continuously (Every 2.5s)</label>
+        <input id="aiAutoPoll" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
       </div>
     </div>
 
@@ -1188,11 +1226,6 @@ app.get("/", (req, res) => {
         <div id="aiResultPrice" style="font-size:28px;font-weight:700;color:#30d158;margin:4px 0;">—</div>
         <div id="aiResultMeta" style="font-size:12px;color:#a1a1a6;font-family:ui-monospace,monospace;"></div>
       </div>
-    </div>
-
-    <div class="sec">Recent Integration History</div>
-    <div class="card">
-      <div class="peek-list" id="aiLogList">No incoming requests yet.</div>
     </div>
   </div>
 
@@ -1620,6 +1653,60 @@ document.getElementById("copyWebhookBtn").onclick = () => {
     document.getElementById("aiWebhookUrl").select();
     document.execCommand("copy");
     flashToast("Webhook URL Copied!");
+  }
+};
+
+document.getElementById("saveTargetFieldBtn").onclick = async () => {
+  const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
+  try {
+    const res = await fetch("/api/integrations/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetField })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      flashToast("Data Field Saved: " + targetField);
+      loadIntegrationsConfig();
+    } else {
+      flashToast("Error saving field");
+    }
+  } catch(e) {
+    flashToast("Save failed");
+  }
+};
+
+document.getElementById("sendSimulatedWebhookBtn").onclick = async () => {
+  const input = (document.getElementById("aiSimulateInput").value || "").trim();
+  if (!input) {
+    flashToast("Enter an item to simulate!");
+    return;
+  }
+  const btn = document.getElementById("sendSimulatedWebhookBtn");
+  btn.textContent = "Sending...";
+  btn.disabled = true;
+  try {
+    const field = (document.getElementById("aiTargetField").value || "").trim() || "data";
+    const payload = {};
+    payload[field] = input;
+    const res = await fetch("/api/inject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      flashToast('Incoming Peek: "' + (data.input || "") + '" -> Forced: $' + Number(data.forceNumber).toLocaleString());
+      loadCalc();
+      loadIntegrationsConfig();
+    } else {
+      alert("Incoming Webhook Error: " + (data.error || "Failed"));
+    }
+  } catch(err) {
+    alert("Connection Error: " + err.message);
+  } finally {
+    btn.textContent = "⚡ Test Inbound";
+    btn.disabled = false;
   }
 };
 
