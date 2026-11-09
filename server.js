@@ -536,6 +536,8 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
     state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
     state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
+    if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
+    if (b.hint !== undefined) state.calc.mirror.hint = String(b.hint || "");
     state.calc.mirror.updatedAt = Date.now();
     lastCalcHeartbeatAt = Date.now();
   }
