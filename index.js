@@ -45,6 +45,15 @@ const DEFAULT_CALC_MODES = {
   autoOpOnLock: false,
   hintStyle: "bright",
   statusBarMode: "opaque",
+  digitHolds: {
+    "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
+    "2": { url: "", openSafari: true },
+    "3": { url: "", openSafari: true },
+    "4": { url: "", openSafari: true },
+    "5": { url: "", openSafari: true },
+    "6": { url: "", openSafari: true },
+    "8": { url: "", openSafari: true }
+  },
   mirror: {
     enabled: true,
     direction: "spectator-to-magician",
@@ -346,6 +355,21 @@ app.post("/api/config", async (req, res) => {
   }
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
+  if (typeof b.digitHolds === "object" && b.digitHolds !== null) {
+    if (!state.calc.digitHolds) state.calc.digitHolds = {};
+    for (const d of ["1", "2", "3", "4", "5", "6", "8"]) {
+      if (b.digitHolds[d] !== undefined) {
+        if (typeof b.digitHolds[d] === "string") {
+          state.calc.digitHolds[d] = { url: b.digitHolds[d].trim(), openSafari: true };
+        } else if (typeof b.digitHolds[d] === "object" && b.digitHolds[d] !== null) {
+          state.calc.digitHolds[d] = {
+            url: typeof b.digitHolds[d].url === "string" ? b.digitHolds[d].url.trim() : "",
+            openSafari: b.digitHolds[d].openSafari !== false
+          };
+        }
+      }
+    }
+  }
   if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
@@ -1642,6 +1666,66 @@ app.get("/", (req, res) => {
           <input id="cAcSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
         </div>
       </div>
+
+      <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
+        <div class="subhead" style="color:var(--orange);"><span>4. Keypad Digit Hold Actions (0.45s)</span></div>
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;line-height:1.4;">
+          Holding any number down for 0.45s triggers a covert link or tool. Normal quick taps just enter digits as usual.
+        </div>
+        
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 7:</b> History Log Sheet</span>
+          <span style="color:#30d158;font-size:11px;font-weight:700;">FIXED (HISTORY)</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 9:</b> Stopwatch App Clip</span>
+          <span style="color:#ff9f0a;font-size:11px;font-weight:700;">FIXED (STOPWATCH)</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 0:</b> Performer HUD Controller</span>
+          <span style="color:#0a84ff;font-size:11px;font-weight:700;">FIXED (HUD)</span>
+        </div>
+
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+          <div style="font-size:12px;font-weight:700;color:#fff;">Configurable Number Keys:</div>
+          
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 1:</label>
+            <input id="cHoldUrl_1" type="text" placeholder="https://..." value="https://icontrol-magic.onrender.com/" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_1" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 2:</label>
+            <input id="cHoldUrl_2" type="text" placeholder="https://..." value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_2" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 3:</label>
+            <input id="cHoldUrl_3" type="text" placeholder="https://..." value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_3" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 4:</label>
+            <input id="cHoldUrl_4" type="text" placeholder="https://..." value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_4" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 5:</label>
+            <input id="cHoldUrl_5" type="text" placeholder="https://..." value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_5" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 6:</label>
+            <input id="cHoldUrl_6" type="text" placeholder="https://..." value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_6" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+          <div class="row" style="margin:0;gap:8px;">
+            <label style="width:55px;font-weight:700;">Key 8:</label>
+            <input id="cHoldUrl_8" type="text" placeholder="https://... or dice" value="" style="flex:1;">
+            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_8" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          </div>
+        </div>
+      </div>
     </div>
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
@@ -2123,6 +2207,21 @@ async function loadCalc(onlyMirror){
       document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === smPill));
     }
 
+    // Digit Hold Shortcuts
+    if (d.digitHolds && typeof d.digitHolds === "object") {
+      for (const dig of ["1","2","3","4","5","6","8"]) {
+        const uIn = document.getElementById("cHoldUrl_" + dig);
+        const sIn = document.getElementById("cHoldSafari_" + dig);
+        const item = d.digitHolds[dig];
+        if (uIn && item) {
+          uIn.value = typeof item === "string" ? item : (item.url || "");
+        }
+        if (sIn && item && typeof item === "object") {
+          sIn.checked = item.openSafari !== false;
+        }
+      }
+    }
+
     // Days Alive update
     const mRes = await fetch("/api/calc/mirror", { cache: "no-store" });
     const mData = await mRes.json();
@@ -2249,6 +2348,17 @@ async function pushSwNow(toastText){
 async function pushCalcNow(toastText){
   const activeSmPill = document.querySelector("#cStatusBarPills .mpill.sel");
   const activeSm = activeSmPill ? activeSmPill.dataset.statusmode : "opaque";
+  const digitHolds = {};
+  for (const dig of ["1","2","3","4","5","6","8"]) {
+    const uIn = document.getElementById("cHoldUrl_" + dig);
+    const sIn = document.getElementById("cHoldSafari_" + dig);
+    if (uIn) {
+      digitHolds[dig] = {
+        url: uIn.value.trim(),
+        openSafari: sIn ? sIn.checked : true
+      };
+    }
+  }
   const body = {
     mode: Number(document.getElementById("cMode").value),
     fixed: document.getElementById("cFixed").value,
@@ -2258,6 +2368,7 @@ async function pushCalcNow(toastText){
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
     statusBarMode: activeSm,
+    digitHolds,
     clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
     clockOpenSafari: document.getElementById("cClockSafari").checked,
     redirectUrl: document.getElementById("cRedirect").value.trim(),
