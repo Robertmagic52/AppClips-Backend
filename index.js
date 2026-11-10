@@ -598,6 +598,15 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
       seq: Number(b.seq) || Date.now(),
       showHint: b.showHint
     };
+    if (b.key === "lock" || b.key === "arm") {
+      state.calc.mirror.locked = true;
+      if (b.hint) state.calc.mirror.hint = String(b.hint);
+    } else if (b.key === "unlock") {
+      state.calc.mirror.locked = false;
+      state.calc.mirror.hint = "";
+    }
+    if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
+    if (b.hint) state.calc.mirror.hint = String(b.hint);
     if (b.display !== undefined) state.calc.mirror.display = String(b.display);
     if (b.expr !== undefined) state.calc.mirror.expr = String(b.expr);
     state.calc.mirror.lastKey = String(b.key || "");
@@ -608,7 +617,15 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
     state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
     if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
-    if (b.hint !== undefined) state.calc.mirror.hint = String(b.hint || "");
+    if (b.hint !== undefined && b.hint !== "") state.calc.mirror.hint = String(b.hint || "");
+    if (b.key === "add" || b.key === "sub" || b.key === "+" || b.key === "−" || b.key === "-") {
+      state.calc.mirror.hintDismissed = true;
+    }
+    if (b.key === "clear" || b.key === "ac") {
+      state.calc.mirror.locked = false;
+      state.calc.mirror.hint = "";
+      state.calc.mirror.hintDismissed = false;
+    }
     if (b.secretNum) {
       if (!state.calc.daysAlive) state.calc.daysAlive = {};
       state.calc.daysAlive.secretNum = String(b.secretNum);
