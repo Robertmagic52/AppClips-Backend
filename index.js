@@ -45,6 +45,7 @@ const DEFAULT_CALC_MODES = {
   autoOpOnLock: false,
   hintStyle: "bright",
   statusBarMode: "opaque",
+  digitHoldDuration: 0.8,
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -355,6 +356,9 @@ app.post("/api/config", async (req, res) => {
   }
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
+  if (isFinite(Number(b.digitHoldDuration)) && Number(b.digitHoldDuration) > 0) {
+    state.calc.digitHoldDuration = Number(b.digitHoldDuration);
+  }
   if (typeof b.digitHolds === "object" && b.digitHolds !== null) {
     if (!state.calc.digitHolds) state.calc.digitHolds = {};
     for (const d of ["1", "2", "3", "4", "5", "6", "8"]) {
@@ -1724,6 +1728,17 @@ app.get("/", (req, res) => {
             <input id="cHoldUrl_8" type="text" placeholder="https://... or dice" value="" style="flex:1;">
             <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_8" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
           </div>
+
+          <div class="row" style="margin-top:12px;padding-top:10px;border-top:1px solid #2c2c2e;display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <div style="font-weight:600;font-size:13px;color:#fff;">Number Hold Duration</div>
+              <div style="font-size:11px;color:#8e8e93;">How long a number key must be held down (prevents slow spectator misfires)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input id="cDigitHoldDuration" type="number" step="0.05" min="0.4" max="2.5" value="0.8" style="width:75px;text-align:center;">
+              <span style="font-size:12px;color:#8e8e93;">sec</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2208,6 +2223,8 @@ async function loadCalc(onlyMirror){
     }
 
     // Digit Hold Shortcuts
+    const dhdIn = document.getElementById("cDigitHoldDuration");
+    if (dhdIn) dhdIn.value = (d.digitHoldDuration !== undefined) ? d.digitHoldDuration : 0.8;
     if (d.digitHolds && typeof d.digitHolds === "object") {
       for (const dig of ["1","2","3","4","5","6","8"]) {
         const uIn = document.getElementById("cHoldUrl_" + dig);
@@ -2359,6 +2376,8 @@ async function pushCalcNow(toastText){
       };
     }
   }
+  const dhdIn = document.getElementById("cDigitHoldDuration");
+  const digitHoldDuration = dhdIn ? (Number(dhdIn.value) || 0.8) : 0.8;
   const body = {
     mode: Number(document.getElementById("cMode").value),
     fixed: document.getElementById("cFixed").value,
@@ -2368,6 +2387,7 @@ async function pushCalcNow(toastText){
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
     statusBarMode: activeSm,
+    digitHoldDuration,
     digitHolds,
     clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
     clockOpenSafari: document.getElementById("cClockSafari").checked,
