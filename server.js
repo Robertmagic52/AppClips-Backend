@@ -44,6 +44,7 @@ const DEFAULT_CALC_MODES = {
   hold: 0.15,
   autoOpOnLock: false,
   hintStyle: "bright",
+  statusBarMode: "transparent",
   mirror: {
     enabled: true,
     direction: "spectator-to-magician",
@@ -344,6 +345,7 @@ app.post("/api/config", async (req, res) => {
     state.calc.daysAlive = {};
   }
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
+  if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
   if (typeof b.activeRoom === "string" && b.activeRoom.trim()) state.calc.activeRoom = b.activeRoom.trim().toUpperCase();
   if (Array.isArray(b.savedSites)) updateSavedSites(b.savedSites);
   state.calc.updatedAt = Date.now();
@@ -1373,6 +1375,13 @@ app.get("/", (req, res) => {
         </div>
       </div>
       <div class="row">
+        <label>Spectator Top Bar Spacing</label>
+        <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:230px;">
+          <button type="button" class="mpill sel" data-statusmode="transparent">Transparent (Normal)</button>
+          <button type="button" class="mpill" data-statusmode="opaque">Opaque (Moved Up)</button>
+        </div>
+      </div>
+      <div class="row">
         <label>Force Mode</label>
         <select id="swMode">
           <option value="seq" selected>Lotto / 6-Number Sequence</option>
@@ -1554,6 +1563,13 @@ app.get("/", (req, res) => {
         <div class="mode-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:180px;">
           <button type="button" class="mpill sel" data-timefmt="12">12-Hour (11:02)</button>
           <button type="button" class="mpill" data-timefmt="24">24-Hour (23:02)</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Spectator Top Bar Spacing</label>
+        <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:230px;">
+          <button type="button" class="mpill sel" data-statusmode="transparent">Transparent (Normal)</button>
+          <button type="button" class="mpill" data-statusmode="opaque">Opaque (Moved Up)</button>
         </div>
       </div>
       <div class="row">
@@ -2107,6 +2123,13 @@ async function loadCalc(onlyMirror){
       document.querySelectorAll("#cTimeFmtPills .mpill").forEach(x => x.classList.toggle("sel", x === tfPill));
     }
 
+    // Spectator Status Bar Mode update
+    const sm = d.statusBarMode || "transparent";
+    const smPill = document.querySelector(\`#cStatusBarPills .mpill[data-statusmode="\${sm}"]\`);
+    if (smPill) {
+      document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === smPill));
+    }
+
     // Days Alive update
     const mRes = await fetch("/api/calc/mirror", { cache: "no-store" });
     const mData = await mRes.json();
@@ -2177,6 +2200,19 @@ document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
   };
 });
 
+document.querySelectorAll("#cStatusBarPills .mpill").forEach(b => {
+  b.onclick = async () => {
+    const sm = b.dataset.statusmode;
+    document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
+    await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statusBarMode: sm })
+    });
+    flashToast("Spectator Top Bar set to " + (sm === "opaque" ? "Opaque (Moved Up)" : "Transparent (Normal)") + "!");
+  };
+});
+
 const fdaBtn = document.getElementById("forceDaysAliveBtn");
 if (fdaBtn) {
   fdaBtn.onclick = async () => {
@@ -2218,6 +2254,8 @@ async function pushSwNow(toastText){
 }
 
 async function pushCalcNow(toastText){
+  const activeSmPill = document.querySelector("#cStatusBarPills .mpill.sel");
+  const activeSm = activeSmPill ? activeSmPill.dataset.statusmode : "transparent";
   const body = {
     mode: Number(document.getElementById("cMode").value),
     fixed: document.getElementById("cFixed").value,
@@ -2226,6 +2264,7 @@ async function pushCalcNow(toastText){
     hold: Number(document.getElementById("cHold").value),
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
+    statusBarMode: activeSm,
     clockSiteUrl: document.getElementById("cClockUrl").value.trim(),
     clockOpenSafari: document.getElementById("cClockSafari").checked,
     redirectUrl: document.getElementById("cRedirect").value.trim(),
