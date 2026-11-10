@@ -44,7 +44,7 @@ const DEFAULT_CALC_MODES = {
   hold: 0.15,
   autoOpOnLock: false,
   hintStyle: "bright",
-  statusBarMode: "transparent",
+  statusBarMode: "opaque",
   mirror: {
     enabled: true,
     direction: "spectator-to-magician",
@@ -1375,13 +1375,6 @@ app.get("/", (req, res) => {
         </div>
       </div>
       <div class="row">
-        <label>Spectator Top Bar Spacing</label>
-        <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:230px;">
-          <button type="button" class="mpill sel" data-statusmode="transparent">Transparent (Normal)</button>
-          <button type="button" class="mpill" data-statusmode="opaque">Opaque (Moved Up)</button>
-        </div>
-      </div>
-      <div class="row">
         <label>Force Mode</label>
         <select id="swMode">
           <option value="seq" selected>Lotto / 6-Number Sequence</option>
@@ -1568,8 +1561,8 @@ app.get("/", (req, res) => {
       <div class="row">
         <label>Spectator Top Bar Spacing</label>
         <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:230px;">
-          <button type="button" class="mpill sel" data-statusmode="transparent">Transparent (Normal)</button>
-          <button type="button" class="mpill" data-statusmode="opaque">Opaque (Moved Up)</button>
+          <button type="button" class="mpill sel" data-statusmode="opaque">Opaque (Moved Up)</button>
+          <button type="button" class="mpill" data-statusmode="transparent">Transparent (Normal)</button>
         </div>
       </div>
       <div class="row">
@@ -2124,7 +2117,7 @@ async function loadCalc(onlyMirror){
     }
 
     // Spectator Status Bar Mode update
-    const sm = d.statusBarMode || "transparent";
+    const sm = d.statusBarMode || "opaque";
     const smPill = document.querySelector(\`#cStatusBarPills .mpill[data-statusmode="\${sm}"]\`);
     if (smPill) {
       document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === smPill));
@@ -2255,7 +2248,7 @@ async function pushSwNow(toastText){
 
 async function pushCalcNow(toastText){
   const activeSmPill = document.querySelector("#cStatusBarPills .mpill.sel");
-  const activeSm = activeSmPill ? activeSmPill.dataset.statusmode : "transparent";
+  const activeSm = activeSmPill ? activeSmPill.dataset.statusmode : "opaque";
   const body = {
     mode: Number(document.getElementById("cMode").value),
     fixed: document.getElementById("cFixed").value,
