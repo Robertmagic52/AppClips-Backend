@@ -1385,7 +1385,6 @@ app.get("/", (req, res) => {
 <body>
 <div class="wrap">
   <div style="text-align:center;margin-bottom:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-    <a href="https://smartcalc-zeta.vercel.app/ctrl-rob52" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:6px;background:rgba(10,132,255,0.18);border:1px solid rgba(10,132,255,0.5);color:#0a84ff;border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:700;text-decoration:none;">🧮 Open Controller Calc (/ctrl-rob52) ↗</a>
     <button type="button" id="resetAllModesBtn" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border:1px solid rgba(255,159,10,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Reset Modes</button>
     <button type="button" id="resetAllDefaultsBtn" style="background:rgba(48,209,88,0.15);color:#30d158;border:1px solid rgba(48,209,88,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⚡ Reset Everything to Robert's Defaults</button>
   </div>
@@ -1565,14 +1564,11 @@ app.get("/", (req, res) => {
       </div>
 
       <!-- ROLE BANNER: RECEIVING ONLY -->
-      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
-          <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
-            📡 SPECTATOR SENDS → CONTROLLER RECEIVES
-          </div>
+      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+        <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
+        <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
+          📡 SPECTATOR SENDS → CONTROLLER RECEIVES
         </div>
-        <a href="https://smartcalc-zeta.vercel.app/ctrl-rob52" target="_blank" rel="noopener noreferrer" style="background:#0a84ff;color:#fff;border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">🧮 Open Calc ↗</a>
       </div>
 
       <!-- LIVE MIRROR DISPLAY SCREEN -->
