@@ -555,6 +555,44 @@ app.post("/api/calc/heartbeat", (req, res) => {
   });
 });
 
+function getBackendCalcHint() {
+  try {
+    const c = state.calc || {};
+    let target = 0;
+    if (c.daysAlive && c.daysAlive.daysAlive) {
+      target = Number(c.daysAlive.daysAlive);
+    } else if (c.mode === 1) {
+      target = Number(c.fixed || 6417118);
+    } else {
+      const now = new Date();
+      let h = now.getHours();
+      const m = now.getMinutes();
+      const s = now.getSeconds();
+      if (c.timeFormat === "12") {
+        h = h % 12;
+        if (h === 0) h = 12;
+      }
+      const targetSec = (h * 3600 + m * 60 + s) + (Number(c.offset) || 0);
+      const totalSec = ((targetSec % 86400) + 86400) % 86400;
+      let th = Math.floor(totalSec / 3600);
+      const tm = Math.floor((totalSec % 3600) / 60);
+      const ts = totalSec % 60;
+      if (c.timeFormat === "12") {
+        th = th % 12;
+        if (th === 0) th = 12;
+      }
+      target = Number(`${th}${String(tm).padStart(2, "0")}${String(ts).padStart(2, "0")}`);
+    }
+    const curVal = Number(c.mirror?.display || 0);
+    const diff = target - curVal;
+    const sign = diff >= 0 ? "+" : "−";
+    const count = String(Math.abs(diff)).replace(/\D/g, "").length || 1;
+    return `${sign}${count}`;
+  } catch(_) {
+    return "+1";
+  }
+}
+
 app.post("/api/calc/mirror/keystroke", (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   if (!state.calc.mirror) {
@@ -600,7 +638,7 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     };
     if (b.key === "lock" || b.key === "arm") {
       state.calc.mirror.locked = true;
-      if (b.hint) state.calc.mirror.hint = String(b.hint);
+      state.calc.mirror.hint = b.hint ? String(b.hint) : getBackendCalcHint();
     } else if (b.key === "unlock") {
       state.calc.mirror.locked = false;
       state.calc.mirror.hint = "";
