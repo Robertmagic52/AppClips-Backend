@@ -645,9 +645,11 @@ app.get("/api/calc/mirror", (req, res) => {
 app.post("/api/calc/mirror/toggle", async (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   if (!state.calc.mirror) {
-    state.calc.mirror = { enabled: true, direction: "spectator-to-magician", display: "0", expr: "", lastKey: "", updatedAt: Date.now() };
+    state.calc.mirror = { enabled: true, direction: req.body?.direction || "spectator-to-magician", display: "0", expr: "", lastKey: "", updatedAt: Date.now() };
   } else {
-    state.calc.mirror.direction = "spectator-to-magician";
+    if (req.body?.direction === "magician-to-spectator" || req.body?.direction === "spectator-to-magician") {
+      state.calc.mirror.direction = req.body.direction;
+    }
     if (typeof req.body?.enabled === "boolean") {
       state.calc.mirror.enabled = req.body.enabled;
     }
@@ -2206,8 +2208,11 @@ async function loadCalc(onlyMirror){
       mirLastSeen.style.color = hbData.spectatorConnected ? "#30d158" : "#8e8e93";
     }
     if (mirRoleTxt) {
-      mirRoleTxt.textContent = "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
-      mirRoleTxt.style.color = "#30d158";
+      const isMagToSpec = (mir.direction === "magician-to-spectator");
+      mirRoleTxt.textContent = isMagToSpec 
+        ? "📲 CONTROLLER SENDS → SPECTATOR RECEIVES" 
+        : "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
+      mirRoleTxt.style.color = isMagToSpec ? "#ff9f0a" : "#30d158";
     }
 
     // Clock Time Format update
