@@ -71,7 +71,12 @@ const DEFAULT_CALC_MODES = {
     starSymbol: "",
     at: ""
   },
-  timeFormat: "12"
+  timeFormat: "12",
+  lockCancelUrl: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1",
+  lockCancelOpenSafari: true,
+  lockEmergencyUrl: "",
+  lockEmergencyOpenSafari: true,
+  lockBlur: 32
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -346,6 +351,13 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.clockOpenSafari === "boolean") state.calc.clockOpenSafari = b.clockOpenSafari;
   if (typeof b.acRedirectUrl === "string") state.calc.acRedirectUrl = b.acRedirectUrl.trim();
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
+  if (typeof b.lockCancelUrl === "string") state.calc.lockCancelUrl = b.lockCancelUrl.trim();
+  if (typeof b.lockCancelOpenSafari === "boolean") state.calc.lockCancelOpenSafari = b.lockCancelOpenSafari;
+  if (typeof b.lockEmergencyUrl === "string") state.calc.lockEmergencyUrl = b.lockEmergencyUrl.trim();
+  if (typeof b.lockEmergencyOpenSafari === "boolean") state.calc.lockEmergencyOpenSafari = b.lockEmergencyOpenSafari;
+  if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
+    state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
+  }
   if (typeof b.mirror === "object" && b.mirror) {
     if (!state.calc.mirror) state.calc.mirror = {};
     if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
