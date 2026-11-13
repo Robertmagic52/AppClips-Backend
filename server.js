@@ -46,6 +46,9 @@ const DEFAULT_CALC_MODES = {
   hintStyle: "bright",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
+  bdayAutoDetect: true,
+  bdayMethod: "remainder",
+  birthdayMode: false,
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -366,6 +369,9 @@ app.post("/api/config", async (req, res) => {
   if (b.clearBirthday || b.resetBirthday) {
     state.calc.daysAlive = {};
   }
+  if (typeof b.bdayAutoDetect === "boolean") state.calc.bdayAutoDetect = b.bdayAutoDetect;
+  if (b.bdayMethod === "remainder" || b.bdayMethod === "toxic") state.calc.bdayMethod = b.bdayMethod;
+  if (typeof b.birthdayMode === "boolean") state.calc.birthdayMode = b.birthdayMode;
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
   if (isFinite(Number(b.digitHoldDuration)) && Number(b.digitHoldDuration) > 0) {
@@ -523,6 +529,14 @@ app.post("/api/calc/heartbeat", (req, res) => {
     lastControllerHeartbeatAt = now;
   } else {
     lastCalcHeartbeatAt = now;
+  }
+  if (typeof req.body?.birthdayMode === "boolean") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.birthdayMode = req.body.birthdayMode;
+  }
+  if (req.body?.bdayMethod === "remainder" || req.body?.bdayMethod === "toxic") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.bdayMethod = req.body.bdayMethod;
   }
   if (req.body?.resetBday) {
     if (state.calc) {
@@ -2920,17 +2934,24 @@ loadIntegrationsConfig();
 
 
 // ===== Wallpaper AI clean (fal object-removal) =====
-const FAL_KEY = process.env.FAL_KEY || process.env.FAL_API_KEY || "";
+function getSanitizedFalKey(overrideKey) {
+  const raw = (overrideKey || process.env.FAL_KEY || process.env.FAL_API_KEY || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/fal_sk_[a-zA-Z0-9]+:[a-zA-Z0-9]+/);
+  if (match) return match[0];
+  return raw.replace(/[\r\n]+/g, "").replace(/^Key\s+/i, "").replace(/^fal\s+ai\s*/i, "").trim();
+}
+
 const FAL_OBJECT_REMOVAL = "https://fal.run/fal-ai/image-apps-v2/object-removal";
 const LOCK_UI_PROMPT =
-  "iOS lock screen user interface, status bar, clock time, date, Dynamic Island, " +
-  "widgets, notification banners, Notification Center cards, Control Center, " +
-  "Now Playing media player, flashlight button, camera button, home indicator, " +
-  "passcode keypad, Enter Passcode text, dots, Emergency Cancel buttons, all UI overlays and text";
+  "iOS lock screen user interface, digital clock time, date text, status bar icons, battery, wifi, Dynamic Island, " +
+  "widgets, notifications, flashlight icon, camera icon, home indicator bar, " +
+  "passcode keypad, Enter Passcode text, passcode dots, Emergency Cancel buttons, all UI overlays and text";
 
 app.post("/api/wallpaper/clean", async (req, res) => {
   try {
-    if (!FAL_KEY) {
+    const falKey = getSanitizedFalKey(req.body && (req.body.falKey || req.body.key));
+    if (!falKey) {
       return res.status(500).json({
         ok: false,
         error: "FAL_KEY not set on server. Add FAL_KEY in Render env vars."
@@ -2953,7 +2974,7 @@ app.post("/api/wallpaper/clean", async (req, res) => {
     const falRes = await fetch(FAL_OBJECT_REMOVAL, {
       method: "POST",
       headers: {
-        Authorization: "Key " + FAL_KEY,
+        Authorization: "Key " + falKey,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
