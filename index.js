@@ -2944,9 +2944,12 @@ function getSanitizedFalKey(overrideKey) {
 
 const FAL_OBJECT_REMOVAL = "https://fal.run/fal-ai/image-apps-v2/object-removal";
 const LOCK_UI_PROMPT =
-  "iOS lock screen user interface, digital clock time, date text, status bar icons, battery, wifi, Dynamic Island, " +
-  "widgets, notifications, flashlight icon, camera icon, home indicator bar, " +
-  "passcode keypad, Enter Passcode text, passcode dots, Emergency Cancel buttons, all UI overlays and text";
+  "ONLY the flat iOS interface overlays drawn on top of the photo: the large clock time digits, the date text, " +
+  "status bar icons (time, signal, wifi, battery), Dynamic Island, lock icon, widgets, notification banners, " +
+  "flashlight and camera buttons, home indicator bar, passcode keypad, passcode dots, Enter Passcode text, " +
+  "Emergency and Cancel buttons. Remove nothing else. Do NOT change the photo AT ALL: keep every person, object, " +
+  "color, lighting, texture, sharpness, framing and aspect ratio exactly identical to the original. " +
+  "Fill the removed overlay areas so they seamlessly match the surrounding original background.";
 
 app.post("/api/wallpaper/clean", async (req, res) => {
   try {
