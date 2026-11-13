@@ -13,9 +13,9 @@ const DATA_FILE = path.join(__dirname, "state.json");
 const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
 
 app.use(cors());
-app.use(express.json({ limit: "5mb" }));
-app.use(express.urlencoded({ extended: true, limit: "5mb" }));
-app.use(express.text({ type: ["text/*", "application/javascript", "*/*"], limit: "5mb" }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+app.use(express.text({ type: ["text/*", "application/javascript", "*/*"], limit: "15mb" }));
 
 const DEFAULT_SAVED_SITES = [
   { name: "Built-in 3D Dice Roller", url: "dice", openInSafari: false },
@@ -46,9 +46,6 @@ const DEFAULT_CALC_MODES = {
   hintStyle: "bright",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
-  bdayAutoDetect: true,
-  bdayMethod: "remainder",
-  birthdayMode: false,
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -79,7 +76,7 @@ const DEFAULT_CALC_MODES = {
   lockCancelOpenSafari: true,
   lockEmergencyUrl: "",
   lockEmergencyOpenSafari: true,
-  lockBlur: 32
+  lockBlur: 10
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -369,9 +366,6 @@ app.post("/api/config", async (req, res) => {
   if (b.clearBirthday || b.resetBirthday) {
     state.calc.daysAlive = {};
   }
-  if (typeof b.bdayAutoDetect === "boolean") state.calc.bdayAutoDetect = b.bdayAutoDetect;
-  if (b.bdayMethod === "remainder" || b.bdayMethod === "toxic") state.calc.bdayMethod = b.bdayMethod;
-  if (typeof b.birthdayMode === "boolean") state.calc.birthdayMode = b.birthdayMode;
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
   if (isFinite(Number(b.digitHoldDuration)) && Number(b.digitHoldDuration) > 0) {
@@ -529,14 +523,6 @@ app.post("/api/calc/heartbeat", (req, res) => {
     lastControllerHeartbeatAt = now;
   } else {
     lastCalcHeartbeatAt = now;
-  }
-  if (typeof req.body?.birthdayMode === "boolean") {
-    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
-    state.calc.birthdayMode = req.body.birthdayMode;
-  }
-  if (req.body?.bdayMethod === "remainder" || req.body?.bdayMethod === "toxic") {
-    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
-    state.calc.bdayMethod = req.body.bdayMethod;
   }
   if (req.body?.resetBday) {
     if (state.calc) {
@@ -2931,6 +2917,81 @@ loadIntegrationsConfig();
 </body>
 </html>`);
 });
+
+
+// ===== Wallpaper AI clean (fal object-removal) =====
+const FAL_KEY = process.env.FAL_KEY || process.env.FAL_API_KEY || "";
+const FAL_OBJECT_REMOVAL = "https://fal.run/fal-ai/image-apps-v2/object-removal";
+const LOCK_UI_PROMPT =
+  "iOS lock screen user interface, status bar, clock time, date, Dynamic Island, " +
+  "widgets, notification banners, Notification Center cards, Control Center, " +
+  "Now Playing media player, flashlight button, camera button, home indicator, " +
+  "passcode keypad, Enter Passcode text, dots, Emergency Cancel buttons, all UI overlays and text";
+
+app.post("/api/wallpaper/clean", async (req, res) => {
+  try {
+    if (!FAL_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "FAL_KEY not set on server. Add FAL_KEY in Render env vars."
+      });
+    }
+    const imageData = (req.body && (req.body.image || req.body.dataUrl || req.body.image_url)) || "";
+    if (!imageData || typeof imageData !== "string") {
+      return res.status(400).json({ ok: false, error: "Missing image (base64 data URL)" });
+    }
+    // Accept full data URL or raw base64
+    let image_url = imageData.trim();
+    if (!image_url.startsWith("data:") && !image_url.startsWith("http")) {
+      image_url = "data:image/jpeg;base64," + image_url;
+    }
+
+    const prompt =
+      (req.body && typeof req.body.prompt === "string" && req.body.prompt.trim()) ||
+      LOCK_UI_PROMPT;
+
+    const falRes = await fetch(FAL_OBJECT_REMOVAL, {
+      method: "POST",
+      headers: {
+        Authorization: "Key " + FAL_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        image_url,
+        object_to_remove: prompt
+      })
+    });
+
+    const text = await falRes.text();
+    let data;
+    try { data = JSON.parse(text); } catch (_) { data = { raw: text }; }
+
+    if (!falRes.ok) {
+      console.warn("fal object-removal error", falRes.status, text.slice(0, 500));
+      return res.status(502).json({
+        ok: false,
+        error: (data && (data.detail || data.error || data.message)) || ("fal error " + falRes.status),
+        status: falRes.status
+      });
+    }
+
+    const outUrl =
+      (data.images && data.images[0] && data.images[0].url) ||
+      (data.image && data.image.url) ||
+      data.url ||
+      null;
+
+    if (!outUrl) {
+      return res.status(502).json({ ok: false, error: "No image in fal response", data });
+    }
+
+    return res.json({ ok: true, url: outUrl, model: "fal-ai/image-apps-v2/object-removal" });
+  } catch (err) {
+    console.error("wallpaper clean failed", err);
+    return res.status(500).json({ ok: false, error: err.message || "clean failed" });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log("Magic Remote Backend running on port " + PORT);
