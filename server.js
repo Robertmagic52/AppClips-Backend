@@ -46,6 +46,9 @@ const DEFAULT_CALC_MODES = {
   hintStyle: "bright",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
+  bdayAutoDetect: true,
+  bdayMethod: "remainder",
+  birthdayMode: false,
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -71,7 +74,12 @@ const DEFAULT_CALC_MODES = {
     starSymbol: "",
     at: ""
   },
-  timeFormat: "12"
+  timeFormat: "12",
+  lockCancelUrl: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1",
+  lockCancelOpenSafari: true,
+  lockEmergencyUrl: "",
+  lockEmergencyOpenSafari: true,
+  lockBlur: 32
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -346,6 +354,13 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.clockOpenSafari === "boolean") state.calc.clockOpenSafari = b.clockOpenSafari;
   if (typeof b.acRedirectUrl === "string") state.calc.acRedirectUrl = b.acRedirectUrl.trim();
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
+  if (typeof b.lockCancelUrl === "string") state.calc.lockCancelUrl = b.lockCancelUrl.trim();
+  if (typeof b.lockCancelOpenSafari === "boolean") state.calc.lockCancelOpenSafari = b.lockCancelOpenSafari;
+  if (typeof b.lockEmergencyUrl === "string") state.calc.lockEmergencyUrl = b.lockEmergencyUrl.trim();
+  if (typeof b.lockEmergencyOpenSafari === "boolean") state.calc.lockEmergencyOpenSafari = b.lockEmergencyOpenSafari;
+  if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
+    state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
+  }
   if (typeof b.mirror === "object" && b.mirror) {
     if (!state.calc.mirror) state.calc.mirror = {};
     if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
@@ -354,6 +369,9 @@ app.post("/api/config", async (req, res) => {
   if (b.clearBirthday || b.resetBirthday) {
     state.calc.daysAlive = {};
   }
+  if (typeof b.bdayAutoDetect === "boolean") state.calc.bdayAutoDetect = b.bdayAutoDetect;
+  if (b.bdayMethod === "remainder" || b.bdayMethod === "toxic") state.calc.bdayMethod = b.bdayMethod;
+  if (typeof b.birthdayMode === "boolean") state.calc.birthdayMode = b.birthdayMode;
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
   if (isFinite(Number(b.digitHoldDuration)) && Number(b.digitHoldDuration) > 0) {
@@ -511,6 +529,14 @@ app.post("/api/calc/heartbeat", (req, res) => {
     lastControllerHeartbeatAt = now;
   } else {
     lastCalcHeartbeatAt = now;
+  }
+  if (typeof req.body?.birthdayMode === "boolean") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.birthdayMode = req.body.birthdayMode;
+  }
+  if (req.body?.bdayMethod === "remainder" || req.body?.bdayMethod === "toxic") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.bdayMethod = req.body.bdayMethod;
   }
   if (req.body?.resetBday) {
     if (state.calc) {

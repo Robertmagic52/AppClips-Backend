@@ -46,6 +46,9 @@ const DEFAULT_CALC_MODES = {
   hintStyle: "bright",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
+  bdayAutoDetect: true,
+  bdayMethod: "remainder",
+  birthdayMode: false,
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -366,6 +369,9 @@ app.post("/api/config", async (req, res) => {
   if (b.clearBirthday || b.resetBirthday) {
     state.calc.daysAlive = {};
   }
+  if (typeof b.bdayAutoDetect === "boolean") state.calc.bdayAutoDetect = b.bdayAutoDetect;
+  if (b.bdayMethod === "remainder" || b.bdayMethod === "toxic") state.calc.bdayMethod = b.bdayMethod;
+  if (typeof b.birthdayMode === "boolean") state.calc.birthdayMode = b.birthdayMode;
   if (b.timeFormat === "12" || b.timeFormat === "24") state.calc.timeFormat = b.timeFormat;
   if (b.statusBarMode === "transparent" || b.statusBarMode === "opaque") state.calc.statusBarMode = b.statusBarMode;
   if (isFinite(Number(b.digitHoldDuration)) && Number(b.digitHoldDuration) > 0) {
@@ -523,6 +529,14 @@ app.post("/api/calc/heartbeat", (req, res) => {
     lastControllerHeartbeatAt = now;
   } else {
     lastCalcHeartbeatAt = now;
+  }
+  if (typeof req.body?.birthdayMode === "boolean") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.birthdayMode = req.body.birthdayMode;
+  }
+  if (req.body?.bdayMethod === "remainder" || req.body?.bdayMethod === "toxic") {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    state.calc.bdayMethod = req.body.bdayMethod;
   }
   if (req.body?.resetBday) {
     if (state.calc) {
