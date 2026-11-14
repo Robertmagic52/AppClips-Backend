@@ -2942,19 +2942,6 @@ function getSanitizedFalKey(overrideKey) {
   return raw.replace(/[\r\n]+/g, "").replace(/^Key\s+/i, "").replace(/^fal\s+ai\s*/i, "").trim();
 }
 
-app.get("/api/wallpaper/schema", async (req, res) => {
-  try {
-    const falKey = getSanitizedFalKey();
-    const r = await fetch("https://fal.run/fal-ai/image-apps-v2/object-removal/openapi.json", {
-      headers: { Authorization: "Key " + falKey }
-    });
-    const d = await r.json();
-    res.json(d);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
-
 const FAL_DEFAULT_MODEL = "fal-ai/object-removal";
 const LOCK_UI_PROMPT =
   "clock digits, date text, status bar icons, battery icon, wifi icon, lock icon, notification banner, widgets, flashlight button, camera button, home indicator bar, keypad numbers, passcode dots";
