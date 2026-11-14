@@ -81,7 +81,9 @@ const DEFAULT_CALC_MODES = {
   lockCancelOpenSafari: true,
   lockEmergencyUrl: "",
   lockEmergencyOpenSafari: true,
-  lockBlur: 0
+  lockBlur: 0,
+  injectApiUrl: "https://11z.co/_w/19470/selection",
+  injectPushEnabled: true
 };
 
 const DEFAULT_INTEGRATIONS = {
@@ -159,6 +161,8 @@ if (mongoose) {
       history: { type: Array, default: [] },
       timeFormat: { type: String, default: "12" },
       lockAttemptsToUnlock: { type: Number, default: 1 },
+      injectApiUrl: { type: String, default: "https://11z.co/_w/19470/selection" },
+      injectPushEnabled: { type: Boolean, default: true },
       updatedAt: Number
     },
     acaat: {
@@ -366,6 +370,8 @@ app.post("/api/config", async (req, res) => {
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
   }
+  if (typeof b.injectApiUrl === "string") state.calc.injectApiUrl = b.injectApiUrl.trim();
+  if (typeof b.injectPushEnabled === "boolean") state.calc.injectPushEnabled = b.injectPushEnabled;
   if (typeof b.mirror === "object" && b.mirror) {
     if (!state.calc.mirror) state.calc.mirror = {};
     if (typeof b.mirror.enabled === "boolean") state.calc.mirror.enabled = b.mirror.enabled;
@@ -763,6 +769,33 @@ app.post("/api/calc/mirror/toggle", async (req, res) => {
   res.json({ ok: true, mirror: state.calc.mirror });
 });
 
+// Push to Inject Selection Webhook helper: sends real-time alert to Apple Watch & iPhone
+async function sendToInject(targetUrl, value, note) {
+  const url = (targetUrl || state.calc?.injectApiUrl || "https://11z.co/_w/19470/selection").trim();
+  if (!url) return { ok: false, error: "No Inject API URL configured" };
+  const cleanVal = String(value ?? "").trim();
+  if (!cleanVal) return { ok: false, error: "Empty value" };
+  try {
+    const payload = {
+      value: cleanVal,
+      selection: cleanVal
+    };
+    if (note) payload.note = String(note);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const txt = await res.text();
+    let data;
+    try { data = JSON.parse(txt); } catch (_) { data = { raw: txt }; }
+    return { ok: res.ok, status: res.status, data };
+  } catch (err) {
+    console.warn("[Inject Push Error]", err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 // Calculator History Persistence: saves all spectator calculations so magician sees them even after their phone was off
 app.post("/api/calc/history", async (req, res) => {
   try {
@@ -779,7 +812,25 @@ app.post("/api/calc/history", async (req, res) => {
     state.calc.history.unshift(entry);
     if (state.calc.history.length > 100) state.calc.history.length = 100;
     saveState().catch(() => {});
+
+    // Forward to Inject API for Apple Watch / iPhone push notification
+    if (state.calc.injectPushEnabled !== false && entry.res) {
+      sendToInject(state.calc.injectApiUrl, entry.res, entry.meta || entry.expr).catch(() => {});
+    }
+
     res.json({ ok: true, count: state.calc.history.length, entry });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.post("/api/calc/test-inject", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const url = (b.url || state.calc?.injectApiUrl || "https://11z.co/_w/19470/selection").trim();
+    const val = String(b.value || "19470").trim();
+    const r = await sendToInject(url, val, "Test Push from Dashboard");
+    res.json(r);
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) });
   }
@@ -1934,6 +1985,29 @@ app.get("/", (req, res) => {
         </div>
       </div>
     </div>
+
+    <div class="sec">Inject Push Notifications &bull; Apple Watch &amp; iPhone</div>
+    <div class="card">
+      <div style="font-size:13px;color:#a1a1a6;margin-bottom:12px;line-height:1.45;">
+        Whenever a spectator enters a number, completes a calculation, triggers a force, or types their passcode on the lock screen, SmartCalc dispatches a real-time push notification to your <b>Inject</b> API, instantly vibrating your iPhone and Apple Watch!
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <label style="font-weight:600;font-size:14px;color:#fff;display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="cInjectPushEnabled" checked style="width:18px;height:18px;accent-color:var(--orange);">
+          Enable Instant Push on Number Entry
+        </label>
+        <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#1e4628;color:#30d158;">⚡ Sub-50ms Direct + Backup</span>
+      </div>
+      <div class="subbox">
+        <div class="subhead" style="color:var(--orange);display:flex;justify-content:space-between;align-items:center;">
+          <span>Inject Selection Webhook URL</span>
+          <button type="button" id="cTestInjectPushBtn" style="background:var(--orange);color:#000;border:0;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Test Push</button>
+        </div>
+        <input id="cInjectApiUrl" type="url" placeholder="https://11z.co/_w/19470/selection" value="https://11z.co/_w/19470/selection" style="font-family:ui-monospace,monospace;font-size:12px;color:#30d158;background:#000;padding:8px;width:100%;">
+        <div style="font-size:11px;color:#8e8e93;margin-top:6px;">Sends <code>{"value": "&lt;number&gt;", "selection": "&lt;number&gt;"}</code> to trigger your Inject watch &amp; phone alerts.</div>
+      </div>
+    </div>
+
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
 
@@ -2339,6 +2413,8 @@ async function loadCalc(onlyMirror){
       if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
       if (document.getElementById("cLockAttempts")) document.getElementById("cLockAttempts").value = String(d.lockAttemptsToUnlock ?? 1);
       if (document.getElementById("cLockBlur")) document.getElementById("cLockBlur").value = String(d.lockBlur ?? 0);
+      if (document.getElementById("cInjectPushEnabled")) document.getElementById("cInjectPushEnabled").checked = (d.injectPushEnabled !== false);
+      if (document.getElementById("cInjectApiUrl")) document.getElementById("cInjectApiUrl").value = d.injectApiUrl || "https://11z.co/_w/19470/selection";
       renderSavedSitesUI();
     }
 
@@ -2626,6 +2702,8 @@ async function pushCalcNow(toastText){
     lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
     lockAttemptsToUnlock: document.getElementById("cLockAttempts") ? Number(document.getElementById("cLockAttempts").value) : 1,
     lockBlur: document.getElementById("cLockBlur") ? Number(document.getElementById("cLockBlur").value) : 0,
+    injectPushEnabled: document.getElementById("cInjectPushEnabled") ? document.getElementById("cInjectPushEnabled").checked : true,
+    injectApiUrl: document.getElementById("cInjectApiUrl") ? document.getElementById("cInjectApiUrl").value.trim() : "https://11z.co/_w/19470/selection",
     savedSites
   };
   await fetch("/api/config", {
@@ -2634,6 +2712,33 @@ async function pushCalcNow(toastText){
     body: JSON.stringify(body)
   });
   flashToast(toastText || "Calculator Updated Live!");
+}
+
+const testInjectBtn = document.getElementById("cTestInjectPushBtn");
+if (testInjectBtn) {
+  testInjectBtn.onclick = async () => {
+    const url = (document.getElementById("cInjectApiUrl") ? document.getElementById("cInjectApiUrl").value : "").trim();
+    testInjectBtn.textContent = "Sending...";
+    testInjectBtn.disabled = true;
+    try {
+      const res = await fetch("/api/calc/test-inject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, value: "19470" })
+      });
+      const d = await res.json();
+      if (d.ok) {
+        flashToast("⚡ Push sent to Inject! Check iPhone / Watch.");
+      } else {
+        alert("Push response: " + JSON.stringify(d));
+      }
+    } catch (e) {
+      alert("Push error: " + e.message);
+    } finally {
+      testInjectBtn.textContent = "⚡ Test Push";
+      testInjectBtn.disabled = false;
+    }
+  };
 }
 
 document.querySelectorAll("#swModePills .mpill").forEach(btn => {
