@@ -770,11 +770,23 @@ app.post("/api/calc/mirror/toggle", async (req, res) => {
 });
 
 // Push to Inject Selection Webhook helper: sends real-time alert to Apple Watch & iPhone
+let lastServerInjectVal = "";
+let lastServerInjectTime = 0;
+
 async function sendToInject(targetUrl, value, note) {
   const url = (targetUrl || state.calc?.injectApiUrl || "https://11z.co/_w/19470/selection").trim();
   if (!url) return { ok: false, error: "No Inject API URL configured" };
   const cleanVal = String(value ?? "").trim();
   if (!cleanVal) return { ok: false, error: "Empty value" };
+
+  const now = Date.now();
+  // 10-second deduplication: Never send the exact same number twice within 10s
+  if (lastServerInjectVal === cleanVal && (now - lastServerInjectTime) < 10000) {
+    return { ok: true, deduplicated: true };
+  }
+  lastServerInjectVal = cleanVal;
+  lastServerInjectTime = now;
+
   try {
     const payload = {
       value: cleanVal,
@@ -813,8 +825,12 @@ app.post("/api/calc/history", async (req, res) => {
     if (state.calc.history.length > 100) state.calc.history.length = 100;
     saveState().catch(() => {});
 
-    // Forward to Inject API for Apple Watch / iPhone push notification
-    if (state.calc.injectPushEnabled !== false && entry.res) {
+    // Forward to Inject API:
+    // If the spectator client already dispatched directly (sub-50ms), do NOT double-dispatch!
+    if (b.directInjected) {
+      lastServerInjectVal = entry.res;
+      lastServerInjectTime = Date.now();
+    } else if (state.calc.injectPushEnabled !== false && entry.res) {
       sendToInject(state.calc.injectApiUrl, entry.res, entry.meta || entry.expr).catch(() => {});
     }
 
