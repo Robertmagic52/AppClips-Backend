@@ -739,6 +739,39 @@ app.post("/api/calc/mirror/toggle", async (req, res) => {
   res.json({ ok: true, mirror: state.calc.mirror });
 });
 
+// Calculator History Persistence: saves all spectator calculations so magician sees them even after their phone was off
+app.post("/api/calc/history", async (req, res) => {
+  try {
+    if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
+    if (!Array.isArray(state.calc.history)) state.calc.history = [];
+    const b = req.body || {};
+    const entry = {
+      id: "h_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      expr: String(b.expr || b.display || "0"),
+      res: String(b.res || b.display || "0"),
+      meta: String(b.meta || ""),
+      at: Number(b.at) || Date.now()
+    };
+    state.calc.history.unshift(entry);
+    if (state.calc.history.length > 100) state.calc.history.length = 100;
+    saveState().catch(() => {});
+    res.json({ ok: true, count: state.calc.history.length, entry });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+app.get("/api/calc/history", (req, res) => {
+  const list = (state.calc && Array.isArray(state.calc.history)) ? state.calc.history : [];
+  res.json({ ok: true, history: list });
+});
+
+app.post("/api/calc/history/clear", async (req, res) => {
+  if (state.calc) state.calc.history = [];
+  saveState().catch(() => {});
+  res.json({ ok: true, history: [] });
+});
+
 app.post("/api/calc/force-days-alive", async (req, res) => {
   if (!state.calc) state.calc = { ...DEFAULT_CALC_MODES };
   if (state.calc.daysAlive?.daysAlive) {
@@ -2942,9 +2975,9 @@ function getSanitizedFalKey(overrideKey) {
   return raw.replace(/[\r\n]+/g, "").replace(/^Key\s+/i, "").replace(/^fal\s+ai\s*/i, "").trim();
 }
 
-const FAL_DEFAULT_MODEL = "fal-ai/image-apps-v2/object-removal";
+const FAL_DEFAULT_MODEL = "fal-ai/image-editing/object-removal";
 const LOCK_UI_PROMPT =
-  "clock digits, date text, status bar icons, battery icon, wifi icon, lock icon, notification banner, widgets, flashlight button, camera button, home indicator bar, keypad numbers, passcode dots";
+  "clock digits, date text, status bar icons, battery icon, wifi icon, lock icon, notification banner, widgets, flashlight button, camera button, home indicator bar, keypad numbers, passcode dots, circular button outlines, translucent keypad circles, glass button borders";
 
 app.post("/api/wallpaper/clean", async (req, res) => {
   try {
@@ -2978,7 +3011,7 @@ app.post("/api/wallpaper/clean", async (req, res) => {
       image_url,
       prompt,
       object_to_remove: prompt,
-      ...(req.body && req.body.aspect_ratio ? { aspect_ratio: req.body.aspect_ratio } : {})
+      aspect_ratio: (req.body && req.body.aspect_ratio) || "9:16"
     };
 
     const falRes = await fetch(targetUrl, {
