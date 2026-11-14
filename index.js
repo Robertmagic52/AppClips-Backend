@@ -3046,7 +3046,20 @@ app.post("/api/wallpaper/clean", async (req, res) => {
       return res.status(502).json({ ok: false, error: "No image in fal response", data });
     }
 
-    return res.json({ ok: true, url: outUrl, model: requestedModel });
+    let dataUrl = null;
+    try {
+      const imgRes = await fetch(outUrl);
+      if (imgRes.ok) {
+        const ab = await imgRes.arrayBuffer();
+        const b64 = Buffer.from(ab).toString("base64");
+        const ct = imgRes.headers.get("content-type") || "image/jpeg";
+        dataUrl = `data:${ct};base64,${b64}`;
+      }
+    } catch (e) {
+      console.warn("fetch fal image to base64 warn", e);
+    }
+
+    return res.json({ ok: true, url: outUrl, dataUrl: dataUrl || outUrl, model: requestedModel });
   } catch (err) {
     console.error("wallpaper clean failed", err);
     return res.status(500).json({ ok: false, error: err.message || "clean failed" });
