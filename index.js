@@ -79,7 +79,7 @@ const DEFAULT_CALC_MODES = {
   lockCancelOpenSafari: true,
   lockEmergencyUrl: "",
   lockEmergencyOpenSafari: true,
-  lockBlur: 10
+  lockBlur: 0
 };
 
 const DEFAULT_INTEGRATIONS = {
