@@ -2944,8 +2944,9 @@ function getSanitizedFalKey(overrideKey) {
 
 const FAL_OBJECT_REMOVAL = "https://fal.run/fal-ai/image-apps-v2/object-removal";
 const LOCK_UI_PROMPT =
-  "clock digits, date text, status bar icons, lock icon, notification banners, widgets, "+
-  "flashlight button, camera button, home indicator bar, passcode keypad, passcode dots, text overlays";
+  "phone UI overlays, lock screen clock digits, date text, status bar icons, battery icon, signal bars, wifi icon, lock icon, notification banners, widgets, " +
+  "flashlight button, camera button, home indicator bar, passcode keypad numbers, passcode circles dots, swipe up text overlays. " +
+  "Preserve the background subject, person, animal, pet, scenery, lighting, colors, sharpness, and textures exactly without changing or re-generating the underlying image.";
 
 app.post("/api/wallpaper/clean", async (req, res) => {
   try {
