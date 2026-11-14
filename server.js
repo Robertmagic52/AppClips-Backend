@@ -2977,7 +2977,8 @@ app.post("/api/wallpaper/clean", async (req, res) => {
     const payload = {
       image_url,
       prompt,
-      object_to_remove: prompt
+      object_to_remove: prompt,
+      ...(req.body && req.body.aspect_ratio ? { aspect_ratio: req.body.aspect_ratio } : {})
     };
 
     const falRes = await fetch(targetUrl, {
@@ -3012,7 +3013,7 @@ app.post("/api/wallpaper/clean", async (req, res) => {
       return res.status(502).json({ ok: false, error: "No image in fal response", data });
     }
 
-    return res.json({ ok: true, url: outUrl, model: "fal-ai/image-apps-v2/object-removal" });
+    return res.json({ ok: true, url: outUrl, model: requestedModel });
   } catch (err) {
     console.error("wallpaper clean failed", err);
     return res.status(500).json({ ok: false, error: err.message || "clean failed" });
