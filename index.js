@@ -49,6 +49,11 @@ const DEFAULT_CALC_MODES = {
   bdayAutoDetect: true,
   bdayMethod: "remainder",
   birthdayMode: false,
+  autoRedirectOnOpen: false,
+  autoRedirectUrl: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1",
+  autoRedirectSafari: true,
+  lockAttemptsToUnlock: 1,
+  history: [],
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -154,7 +159,12 @@ if (mongoose) {
       acOpenSafari: Boolean,
       mirror: { type: Object, default: {} },
       daysAlive: { type: Object, default: {} },
+      history: { type: Array, default: [] },
       timeFormat: { type: String, default: "12" },
+      autoRedirectOnOpen: { type: Boolean, default: false },
+      autoRedirectUrl: { type: String, default: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" },
+      autoRedirectSafari: { type: Boolean, default: true },
+      lockAttemptsToUnlock: { type: Number, default: 1 },
       updatedAt: Number
     },
     acaat: {
@@ -358,6 +368,10 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.lockCancelOpenSafari === "boolean") state.calc.lockCancelOpenSafari = b.lockCancelOpenSafari;
   if (typeof b.lockEmergencyUrl === "string") state.calc.lockEmergencyUrl = b.lockEmergencyUrl.trim();
   if (typeof b.lockEmergencyOpenSafari === "boolean") state.calc.lockEmergencyOpenSafari = b.lockEmergencyOpenSafari;
+  if (typeof b.autoRedirectOnOpen === "boolean") state.calc.autoRedirectOnOpen = b.autoRedirectOnOpen;
+  if (typeof b.autoRedirectUrl === "string") state.calc.autoRedirectUrl = b.autoRedirectUrl.trim();
+  if (typeof b.autoRedirectSafari === "boolean") state.calc.autoRedirectSafari = b.autoRedirectSafari;
+  if ([1, 2, 3].includes(Number(b.lockAttemptsToUnlock))) state.calc.lockAttemptsToUnlock = Number(b.lockAttemptsToUnlock);
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
   }
@@ -675,6 +689,25 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
     state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
     state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
+
+    // If spectator evaluated an equation (=) or sent display with expression, record to history
+    if (b.key === "eq" || (b.expr && b.display && b.display !== "0")) {
+      if (!Array.isArray(state.calc.history)) state.calc.history = [];
+      const exprStr = String(b.expr || "Calculation");
+      const resStr = String(b.display || "0");
+      const exists = state.calc.history.find(h => h.expr === exprStr && h.res === resStr && Math.abs((h.at || 0) - Date.now()) < 5000);
+      if (!exists) {
+        state.calc.history.unshift({
+          id: "h_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+          expr: exprStr,
+          res: resStr,
+          meta: b.daysAlive ? ((b.daysAlive.starSign || "") + " • " + (b.daysAlive.dateStr || "")) : "",
+          at: Date.now()
+        });
+        if (state.calc.history.length > 100) state.calc.history.length = 100;
+        saveState().catch(() => {});
+      }
+    }
     if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
     if (b.hint !== undefined && b.hint !== "") state.calc.mirror.hint = String(b.hint || "");
     if (b.key === "add" || b.key === "sub" || b.key === "+" || b.key === "−" || b.key === "-") {
@@ -1617,12 +1650,15 @@ app.get("/", (req, res) => {
         <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
       </div>
 
-      <!-- ROLE BANNER: RECEIVING ONLY -->
-      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
-        <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
-        <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
-          📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+      <!-- ROLE BANNER: DUAL DIRECTION -->
+      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
+          <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
+            📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+          </div>
         </div>
+        <button type="button" id="toggleMirrorDirBtn" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;cursor:pointer;">SWITCH DIR</button>
       </div>
 
       <!-- LIVE MIRROR DISPLAY SCREEN -->
@@ -1632,11 +1668,12 @@ app.get("/", (req, res) => {
         <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
       </div>
 
-      <!-- REMOTE CONTROLS: ARM & RESET -->
+      <!-- REMOTE CONTROLS: ARM, 4-LOCK & RESET -->
       <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
-        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force Controls</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;" id="dashboardRemoteKeypad">
-          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM (LOCK)</button>
+        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force &amp; Lock Controls</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
+          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM</button>
+          <button type="button" class="rkey" data-k="lock4" style="padding:10px 0; background:#af52de; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔒 4-LOCK</button>
           <button type="button" class="rkey" data-k="unlock" style="padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
           <button type="button" class="rkey" data-k="clear" style="padding:10px 0; background:#3a3a3c; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">AC RESET</button>
         </div>
@@ -1784,12 +1821,73 @@ app.get("/", (req, res) => {
         </div>
       </div>
 
+      <div class="subbox" style="border:1.5px solid #0a84ff;">
+        <div class="subhead" style="color:#0a84ff;display:flex;justify-content:space-between;align-items:center;">
+          <span>🚀 Auto-Redirect / Breakout on Launch</span>
+          <span style="font-size:11px;font-weight:700;color:#0a84ff;">APP CLIP PRELOAD</span>
+        </div>
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;line-height:1.4;">
+          When enabled, opening the App Clip instantly redirects/breaks out to this link (e.g. iCloud Shortcut or website in Safari) while the calculator runs and cleans the lockscreen in the background.
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <label style="font-weight:600;color:#fff;">Enable Auto-Redirect on App Clip Launch</label>
+          <input id="cAutoRedirect" type="checkbox" style="width:20px;height:20px;accent-color:#0a84ff;">
+        </div>
+        <input id="cAutoRedirectUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
+        <div class="chip-row" data-target="cAutoRedirectUrl" data-safari="cAutoRedirectSafari"></div>
+        <div class="row" style="margin-top:8px;">
+          <label>Open in Safari Tab (break out of App Clip)</label>
+          <input id="cAutoRedirectSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:#0a84ff;">
+        </div>
+      </div>
+
+      <div class="subbox" style="border:1.5px solid rgba(255,255,255,0.2);">
+        <div class="subhead" style="color:#fff;"><span>🔒 Lockscreen Exit Redirects</span></div>
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;line-height:1.4;">
+          Holding Cancel (0.8s) or Emergency in the fake lockscreen redirects out covertly. Triple-tap Cancel returns to calculator.
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:#a1a1a6;">Hold "Cancel" URL (0.8s hold)</label>
+          <input id="cLockCancelUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <label>Open Cancel URL in Safari</label>
+          <input id="cLockCancelSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:#a1a1a6;">Emergency Button URL (0.8s hold)</label>
+          <input id="cLockEmergencyUrl" type="text" value="" placeholder="https://... (defaults to Cancel URL if blank)">
+        </div>
+        <div class="row">
+          <label>Open Emergency in Safari</label>
+          <input id="cLockEmergencySafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        </div>
+        <div class="row inrow" style="margin-top:10px;padding-top:10px;border-top:1px solid #2c2c2e;">
+          <div>
+            <div style="font-weight:600;font-size:13px;color:#fff;">Passcode Attempts to Unlock</div>
+            <div style="font-size:11px;color:#8e8e93;">Set to 2 to fail 1st attempt (shakes &amp; spectator re-enters)</div>
+          </div>
+          <select id="cLockAttempts" style="background:#2c2c2e;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;">
+            <option value="1">1 Attempt (Instant Unlock)</option>
+            <option value="2">2 Attempts (Fail 1st Attempt)</option>
+          </select>
+        </div>
+      </div>
+
       <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
         <div class="subhead" style="color:var(--orange);"><span>4. Keypad Digit Hold Actions (0.45s)</span></div>
         <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;line-height:1.4;">
           Holding any number down for 0.45s triggers a covert link or tool. Normal quick taps just enter digits as usual.
         </div>
         
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 4:</b> 4-Digit Fake Lockscreen (or custom URL below)</span>
+          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 4-LOCK</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 6:</b> 6-Digit Fake Lockscreen (or custom URL below)</span>
+          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 6-LOCK</span>
+        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
           <span><b>Key 7:</b> History Log Sheet</span>
           <span style="color:#30d158;font-size:11px;font-weight:700;">FIXED (HISTORY)</span>
@@ -2254,6 +2352,14 @@ async function loadCalc(onlyMirror){
       document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
       document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
       document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
+      if (document.getElementById("cAutoRedirect")) document.getElementById("cAutoRedirect").checked = !!d.autoRedirectOnOpen;
+      if (document.getElementById("cAutoRedirectUrl")) document.getElementById("cAutoRedirectUrl").value = d.autoRedirectUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
+      if (document.getElementById("cAutoRedirectSafari")) document.getElementById("cAutoRedirectSafari").checked = (d.autoRedirectSafari !== false);
+      if (document.getElementById("cLockCancelUrl")) document.getElementById("cLockCancelUrl").value = d.lockCancelUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
+      if (document.getElementById("cLockCancelSafari")) document.getElementById("cLockCancelSafari").checked = (d.lockCancelOpenSafari !== false);
+      if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
+      if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
+      if (document.getElementById("cLockAttempts")) document.getElementById("cLockAttempts").value = String(d.lockAttemptsToUnlock ?? 1);
       renderSavedSitesUI();
     }
 
@@ -2418,6 +2524,24 @@ document.querySelectorAll("#dashboardRemoteKeypad .rkey").forEach(b => {
   };
 });
 
+const toggleMirrorDirBtn = document.getElementById("toggleMirrorDirBtn");
+if (toggleMirrorDirBtn) {
+  toggleMirrorDirBtn.onclick = async () => {
+    try {
+      const res = await fetch("/api/calc/mirror", { cache: "no-store" });
+      const d = await res.json();
+      const curDir = (d && d.mirror && d.mirror.direction === "magician-to-spectator") ? "spectator-to-magician" : "magician-to-spectator";
+      await fetch("/api/calc/mirror/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: curDir, enabled: true })
+      });
+      flashToast("Mirror: " + (curDir === "magician-to-spectator" ? "Transmitting (They Receive)" : "Listening (You Receive)"));
+      loadCalc(true);
+    } catch(e) {}
+  };
+}
+
 document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
   b.onclick = async () => {
     const fmt = b.dataset.timefmt;
@@ -2517,6 +2641,14 @@ async function pushCalcNow(toastText){
     redirectOpenSafari: document.getElementById("cRedirectSafari").checked,
     acRedirectUrl: document.getElementById("cAcUrl").value.trim() || "dice",
     acOpenSafari: document.getElementById("cAcSafari").checked,
+    autoRedirectOnOpen: document.getElementById("cAutoRedirect") ? document.getElementById("cAutoRedirect").checked : false,
+    autoRedirectUrl: document.getElementById("cAutoRedirectUrl") ? document.getElementById("cAutoRedirectUrl").value.trim() : "",
+    autoRedirectSafari: document.getElementById("cAutoRedirectSafari") ? document.getElementById("cAutoRedirectSafari").checked : true,
+    lockCancelUrl: document.getElementById("cLockCancelUrl") ? document.getElementById("cLockCancelUrl").value.trim() : "",
+    lockCancelOpenSafari: document.getElementById("cLockCancelSafari") ? document.getElementById("cLockCancelSafari").checked : true,
+    lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
+    lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
+    lockAttemptsToUnlock: document.getElementById("cLockAttempts") ? Number(document.getElementById("cLockAttempts").value) : 1,
     savedSites
   };
   await fetch("/api/config", {
@@ -2566,7 +2698,7 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator Mode Updated!");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl"].forEach(id => {
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cAutoRedirect","cAutoRedirectUrl","cAutoRedirectSafari","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
 });

@@ -52,6 +52,7 @@ const DEFAULT_CALC_MODES = {
   autoRedirectOnOpen: false,
   autoRedirectUrl: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1",
   autoRedirectSafari: true,
+  lockAttemptsToUnlock: 1,
   history: [],
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
@@ -163,6 +164,7 @@ if (mongoose) {
       autoRedirectOnOpen: { type: Boolean, default: false },
       autoRedirectUrl: { type: String, default: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" },
       autoRedirectSafari: { type: Boolean, default: true },
+      lockAttemptsToUnlock: { type: Number, default: 1 },
       updatedAt: Number
     },
     acaat: {
@@ -369,6 +371,7 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.autoRedirectOnOpen === "boolean") state.calc.autoRedirectOnOpen = b.autoRedirectOnOpen;
   if (typeof b.autoRedirectUrl === "string") state.calc.autoRedirectUrl = b.autoRedirectUrl.trim();
   if (typeof b.autoRedirectSafari === "boolean") state.calc.autoRedirectSafari = b.autoRedirectSafari;
+  if ([1, 2, 3].includes(Number(b.lockAttemptsToUnlock))) state.calc.lockAttemptsToUnlock = Number(b.lockAttemptsToUnlock);
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
   }
@@ -1859,6 +1862,16 @@ app.get("/", (req, res) => {
           <label>Open Emergency in Safari</label>
           <input id="cLockEmergencySafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
         </div>
+        <div class="row inrow" style="margin-top:10px;padding-top:10px;border-top:1px solid #2c2c2e;">
+          <div>
+            <div style="font-weight:600;font-size:13px;color:#fff;">Passcode Attempts to Unlock</div>
+            <div style="font-size:11px;color:#8e8e93;">Set to 2 to fail 1st attempt (shakes &amp; spectator re-enters)</div>
+          </div>
+          <select id="cLockAttempts" style="background:#2c2c2e;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;">
+            <option value="1">1 Attempt (Instant Unlock)</option>
+            <option value="2">2 Attempts (Fail 1st Attempt)</option>
+          </select>
+        </div>
       </div>
 
       <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
@@ -2346,6 +2359,7 @@ async function loadCalc(onlyMirror){
       if (document.getElementById("cLockCancelSafari")) document.getElementById("cLockCancelSafari").checked = (d.lockCancelOpenSafari !== false);
       if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
       if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
+      if (document.getElementById("cLockAttempts")) document.getElementById("cLockAttempts").value = String(d.lockAttemptsToUnlock ?? 1);
       renderSavedSitesUI();
     }
 
@@ -2634,6 +2648,7 @@ async function pushCalcNow(toastText){
     lockCancelOpenSafari: document.getElementById("cLockCancelSafari") ? document.getElementById("cLockCancelSafari").checked : true,
     lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
     lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
+    lockAttemptsToUnlock: document.getElementById("cLockAttempts") ? Number(document.getElementById("cLockAttempts").value) : 1,
     savedSites
   };
   await fetch("/api/config", {
@@ -2683,7 +2698,7 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator Mode Updated!");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cAutoRedirect","cAutoRedirectUrl","cAutoRedirectSafari","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari"].forEach(id => {
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cAutoRedirect","cAutoRedirectUrl","cAutoRedirectSafari","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
 });
