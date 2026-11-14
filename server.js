@@ -1638,12 +1638,15 @@ app.get("/", (req, res) => {
         <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
       </div>
 
-      <!-- ROLE BANNER: RECEIVING ONLY -->
-      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
-        <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
-        <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
-          📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+      <!-- ROLE BANNER: DUAL DIRECTION -->
+      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
+          <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
+            📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+          </div>
         </div>
+        <button type="button" id="toggleMirrorDirBtn" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;cursor:pointer;">SWITCH DIR</button>
       </div>
 
       <!-- LIVE MIRROR DISPLAY SCREEN -->
@@ -1653,11 +1656,12 @@ app.get("/", (req, res) => {
         <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
       </div>
 
-      <!-- REMOTE CONTROLS: ARM & RESET -->
+      <!-- REMOTE CONTROLS: ARM, 4-LOCK & RESET -->
       <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
-        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force Controls</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;" id="dashboardRemoteKeypad">
-          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM (LOCK)</button>
+        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force &amp; Lock Controls</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
+          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM</button>
+          <button type="button" class="rkey" data-k="lock4" style="padding:10px 0; background:#af52de; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔒 4-LOCK</button>
           <button type="button" class="rkey" data-k="unlock" style="padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
           <button type="button" class="rkey" data-k="clear" style="padding:10px 0; background:#3a3a3c; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">AC RESET</button>
         </div>
@@ -1811,6 +1815,14 @@ app.get("/", (req, res) => {
           Holding any number down for 0.45s triggers a covert link or tool. Normal quick taps just enter digits as usual.
         </div>
         
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 4:</b> 4-Digit Fake Lockscreen (or custom URL below)</span>
+          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 4-LOCK</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
+          <span><b>Key 6:</b> 6-Digit Fake Lockscreen (or custom URL below)</span>
+          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 6-LOCK</span>
+        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
           <span><b>Key 7:</b> History Log Sheet</span>
           <span style="color:#30d158;font-size:11px;font-weight:700;">FIXED (HISTORY)</span>
@@ -2438,6 +2450,24 @@ document.querySelectorAll("#dashboardRemoteKeypad .rkey").forEach(b => {
     } catch(e) {}
   };
 });
+
+const toggleMirrorDirBtn = document.getElementById("toggleMirrorDirBtn");
+if (toggleMirrorDirBtn) {
+  toggleMirrorDirBtn.onclick = async () => {
+    try {
+      const res = await fetch("/api/calc/mirror", { cache: "no-store" });
+      const d = await res.json();
+      const curDir = (d && d.mirror && d.mirror.direction === "magician-to-spectator") ? "spectator-to-magician" : "magician-to-spectator";
+      await fetch("/api/calc/mirror/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: curDir, enabled: true })
+      });
+      flashToast("Mirror: " + (curDir === "magician-to-spectator" ? "Transmitting (They Receive)" : "Listening (You Receive)"));
+      loadCalc(true);
+    } catch(e) {}
+  };
+}
 
 document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
   b.onclick = async () => {
