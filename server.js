@@ -2942,7 +2942,7 @@ function getSanitizedFalKey(overrideKey) {
   return raw.replace(/[\r\n]+/g, "").replace(/^Key\s+/i, "").replace(/^fal\s+ai\s*/i, "").trim();
 }
 
-const FAL_OBJECT_REMOVAL = "https://fal.run/fal-ai/image-apps-v2/object-removal";
+const FAL_DEFAULT_MODEL = "fal-ai/object-removal";
 const LOCK_UI_PROMPT =
   "clock digits, date text, status bar icons, battery icon, wifi icon, lock icon, notification banner, widgets, flashlight button, camera button, home indicator bar, keypad numbers, passcode dots";
 
@@ -2969,16 +2969,24 @@ app.post("/api/wallpaper/clean", async (req, res) => {
       (req.body && typeof req.body.prompt === "string" && req.body.prompt.trim()) ||
       LOCK_UI_PROMPT;
 
-    const falRes = await fetch(FAL_OBJECT_REMOVAL, {
+    const requestedModel = (req.body && req.body.model) || FAL_DEFAULT_MODEL;
+    const targetUrl = requestedModel.startsWith("http")
+      ? requestedModel
+      : "https://fal.run/" + requestedModel.replace(/^\/+/, "");
+
+    const payload = {
+      image_url,
+      prompt,
+      object_to_remove: prompt
+    };
+
+    const falRes = await fetch(targetUrl, {
       method: "POST",
       headers: {
         Authorization: "Key " + falKey,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        image_url,
-        object_to_remove: prompt
-      })
+      body: JSON.stringify(payload)
     });
 
     const text = await falRes.text();
