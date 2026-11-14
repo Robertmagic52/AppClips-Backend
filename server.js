@@ -693,6 +693,7 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
           at: Date.now()
         });
         if (state.calc.history.length > 100) state.calc.history.length = 100;
+        saveState().catch(() => {});
       }
     }
     if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
