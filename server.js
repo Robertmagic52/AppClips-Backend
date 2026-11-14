@@ -2942,7 +2942,7 @@ function getSanitizedFalKey(overrideKey) {
   return raw.replace(/[\r\n]+/g, "").replace(/^Key\s+/i, "").replace(/^fal\s+ai\s*/i, "").trim();
 }
 
-const FAL_DEFAULT_MODEL = "fal-ai/object-removal";
+const FAL_DEFAULT_MODEL = "fal-ai/image-apps-v2/object-removal";
 const LOCK_UI_PROMPT =
   "clock digits, date text, status bar icons, battery icon, wifi icon, lock icon, notification banner, widgets, flashlight button, camera button, home indicator bar, keypad numbers, passcode dots";
 
