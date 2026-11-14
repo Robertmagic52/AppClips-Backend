@@ -49,6 +49,9 @@ const DEFAULT_CALC_MODES = {
   bdayAutoDetect: true,
   bdayMethod: "remainder",
   birthdayMode: false,
+  autoRedirectOnOpen: false,
+  autoRedirectUrl: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1",
+  autoRedirectSafari: true,
   history: [],
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
@@ -157,6 +160,9 @@ if (mongoose) {
       daysAlive: { type: Object, default: {} },
       history: { type: Array, default: [] },
       timeFormat: { type: String, default: "12" },
+      autoRedirectOnOpen: { type: Boolean, default: false },
+      autoRedirectUrl: { type: String, default: "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" },
+      autoRedirectSafari: { type: Boolean, default: true },
       updatedAt: Number
     },
     acaat: {
@@ -360,6 +366,9 @@ app.post("/api/config", async (req, res) => {
   if (typeof b.lockCancelOpenSafari === "boolean") state.calc.lockCancelOpenSafari = b.lockCancelOpenSafari;
   if (typeof b.lockEmergencyUrl === "string") state.calc.lockEmergencyUrl = b.lockEmergencyUrl.trim();
   if (typeof b.lockEmergencyOpenSafari === "boolean") state.calc.lockEmergencyOpenSafari = b.lockEmergencyOpenSafari;
+  if (typeof b.autoRedirectOnOpen === "boolean") state.calc.autoRedirectOnOpen = b.autoRedirectOnOpen;
+  if (typeof b.autoRedirectUrl === "string") state.calc.autoRedirectUrl = b.autoRedirectUrl.trim();
+  if (typeof b.autoRedirectSafari === "boolean") state.calc.autoRedirectSafari = b.autoRedirectSafari;
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
   }
@@ -1809,6 +1818,49 @@ app.get("/", (req, res) => {
         </div>
       </div>
 
+      <div class="subbox" style="border:1.5px solid #0a84ff;">
+        <div class="subhead" style="color:#0a84ff;display:flex;justify-content:space-between;align-items:center;">
+          <span>🚀 Auto-Redirect / Breakout on Launch</span>
+          <span style="font-size:11px;font-weight:700;color:#0a84ff;">APP CLIP PRELOAD</span>
+        </div>
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;line-height:1.4;">
+          When enabled, opening the App Clip instantly redirects/breaks out to this link (e.g. iCloud Shortcut or website in Safari) while the calculator runs and cleans the lockscreen in the background.
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <label style="font-weight:600;color:#fff;">Enable Auto-Redirect on App Clip Launch</label>
+          <input id="cAutoRedirect" type="checkbox" style="width:20px;height:20px;accent-color:#0a84ff;">
+        </div>
+        <input id="cAutoRedirectUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
+        <div class="chip-row" data-target="cAutoRedirectUrl" data-safari="cAutoRedirectSafari"></div>
+        <div class="row" style="margin-top:8px;">
+          <label>Open in Safari Tab (break out of App Clip)</label>
+          <input id="cAutoRedirectSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:#0a84ff;">
+        </div>
+      </div>
+
+      <div class="subbox" style="border:1.5px solid rgba(255,255,255,0.2);">
+        <div class="subhead" style="color:#fff;"><span>🔒 Lockscreen Exit Redirects</span></div>
+        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;line-height:1.4;">
+          Holding Cancel (0.8s) or Emergency in the fake lockscreen redirects out covertly. Triple-tap Cancel returns to calculator.
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:#a1a1a6;">Hold "Cancel" URL (0.8s hold)</label>
+          <input id="cLockCancelUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
+        </div>
+        <div class="row" style="margin-bottom:8px;">
+          <label>Open Cancel URL in Safari</label>
+          <input id="cLockCancelSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:#a1a1a6;">Emergency Button URL (0.8s hold)</label>
+          <input id="cLockEmergencyUrl" type="text" value="" placeholder="https://... (defaults to Cancel URL if blank)">
+        </div>
+        <div class="row">
+          <label>Open Emergency in Safari</label>
+          <input id="cLockEmergencySafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        </div>
+      </div>
+
       <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
         <div class="subhead" style="color:var(--orange);"><span>4. Keypad Digit Hold Actions (0.45s)</span></div>
         <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;line-height:1.4;">
@@ -2287,6 +2339,13 @@ async function loadCalc(onlyMirror){
       document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
       document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
       document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
+      if (document.getElementById("cAutoRedirect")) document.getElementById("cAutoRedirect").checked = !!d.autoRedirectOnOpen;
+      if (document.getElementById("cAutoRedirectUrl")) document.getElementById("cAutoRedirectUrl").value = d.autoRedirectUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
+      if (document.getElementById("cAutoRedirectSafari")) document.getElementById("cAutoRedirectSafari").checked = (d.autoRedirectSafari !== false);
+      if (document.getElementById("cLockCancelUrl")) document.getElementById("cLockCancelUrl").value = d.lockCancelUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
+      if (document.getElementById("cLockCancelSafari")) document.getElementById("cLockCancelSafari").checked = (d.lockCancelOpenSafari !== false);
+      if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
+      if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
       renderSavedSitesUI();
     }
 
@@ -2568,6 +2627,13 @@ async function pushCalcNow(toastText){
     redirectOpenSafari: document.getElementById("cRedirectSafari").checked,
     acRedirectUrl: document.getElementById("cAcUrl").value.trim() || "dice",
     acOpenSafari: document.getElementById("cAcSafari").checked,
+    autoRedirectOnOpen: document.getElementById("cAutoRedirect") ? document.getElementById("cAutoRedirect").checked : false,
+    autoRedirectUrl: document.getElementById("cAutoRedirectUrl") ? document.getElementById("cAutoRedirectUrl").value.trim() : "",
+    autoRedirectSafari: document.getElementById("cAutoRedirectSafari") ? document.getElementById("cAutoRedirectSafari").checked : true,
+    lockCancelUrl: document.getElementById("cLockCancelUrl") ? document.getElementById("cLockCancelUrl").value.trim() : "",
+    lockCancelOpenSafari: document.getElementById("cLockCancelSafari") ? document.getElementById("cLockCancelSafari").checked : true,
+    lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
+    lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
     savedSites
   };
   await fetch("/api/config", {
@@ -2617,7 +2683,7 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator Mode Updated!");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl"].forEach(id => {
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cAutoRedirect","cAutoRedirectUrl","cAutoRedirectSafari","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
 });
