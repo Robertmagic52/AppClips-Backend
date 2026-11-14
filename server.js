@@ -49,6 +49,7 @@ const DEFAULT_CALC_MODES = {
   bdayAutoDetect: true,
   bdayMethod: "remainder",
   birthdayMode: false,
+  history: [],
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
     "2": { url: "", openSafari: true },
@@ -154,6 +155,7 @@ if (mongoose) {
       acOpenSafari: Boolean,
       mirror: { type: Object, default: {} },
       daysAlive: { type: Object, default: {} },
+      history: { type: Array, default: [] },
       timeFormat: { type: String, default: "12" },
       updatedAt: Number
     },
@@ -675,6 +677,24 @@ app.post("/api/calc/mirror/keystroke", (req, res) => {
     state.calc.mirror.display = String(b.display ?? state.calc.mirror.display);
     state.calc.mirror.expr = String(b.expr ?? state.calc.mirror.expr);
     state.calc.mirror.lastKey = String(b.key ?? state.calc.mirror.lastKey);
+
+    // If spectator evaluated an equation (=) or sent display with expression, record to history
+    if (b.key === "eq" || (b.expr && b.display && b.display !== "0")) {
+      if (!Array.isArray(state.calc.history)) state.calc.history = [];
+      const exprStr = String(b.expr || "Calculation");
+      const resStr = String(b.display || "0");
+      const exists = state.calc.history.find(h => h.expr === exprStr && h.res === resStr && Math.abs((h.at || 0) - Date.now()) < 5000);
+      if (!exists) {
+        state.calc.history.unshift({
+          id: "h_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+          expr: exprStr,
+          res: resStr,
+          meta: b.daysAlive ? ((b.daysAlive.starSign || "") + " • " + (b.daysAlive.dateStr || "")) : "",
+          at: Date.now()
+        });
+        if (state.calc.history.length > 100) state.calc.history.length = 100;
+      }
+    }
     if (b.locked !== undefined) state.calc.mirror.locked = !!b.locked;
     if (b.hint !== undefined && b.hint !== "") state.calc.mirror.hint = String(b.hint || "");
     if (b.key === "add" || b.key === "sub" || b.key === "+" || b.key === "−" || b.key === "-") {
