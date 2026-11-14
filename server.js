@@ -1843,6 +1843,16 @@ app.get("/", (req, res) => {
             <option value="2">2 Attempts (Fail 1st Attempt)</option>
           </select>
         </div>
+        <div class="row inrow" style="margin-top:10px;padding-top:10px;border-top:1px solid #2c2c2e;">
+          <div>
+            <div style="font-weight:600;font-size:13px;color:#fff;">Raw Wallpaper Style</div>
+            <div style="font-size:11px;color:#8e8e93;">Choose whether raw uncleaned wallpaper has blur or is 100% sharp</div>
+          </div>
+          <select id="cLockBlur" style="background:#2c2c2e;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;">
+            <option value="0">Sharp (No Blur - 0px)</option>
+            <option value="75">Frosted Blur (75px)</option>
+          </select>
+        </div>
       </div>
 
       <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
@@ -2323,14 +2333,12 @@ async function loadCalc(onlyMirror){
       document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
       document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
       document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
-      if (document.getElementById("cAutoRedirect")) document.getElementById("cAutoRedirect").checked = !!d.autoRedirectOnOpen;
-      if (document.getElementById("cAutoRedirectUrl")) document.getElementById("cAutoRedirectUrl").value = d.autoRedirectUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
-      if (document.getElementById("cAutoRedirectSafari")) document.getElementById("cAutoRedirectSafari").checked = (d.autoRedirectSafari !== false);
       if (document.getElementById("cLockCancelUrl")) document.getElementById("cLockCancelUrl").value = d.lockCancelUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
       if (document.getElementById("cLockCancelSafari")) document.getElementById("cLockCancelSafari").checked = (d.lockCancelOpenSafari !== false);
       if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
       if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
       if (document.getElementById("cLockAttempts")) document.getElementById("cLockAttempts").value = String(d.lockAttemptsToUnlock ?? 1);
+      if (document.getElementById("cLockBlur")) document.getElementById("cLockBlur").value = String(d.lockBlur ?? 0);
       renderSavedSitesUI();
     }
 
@@ -2617,6 +2625,7 @@ async function pushCalcNow(toastText){
     lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
     lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
     lockAttemptsToUnlock: document.getElementById("cLockAttempts") ? Number(document.getElementById("cLockAttempts").value) : 1,
+    lockBlur: document.getElementById("cLockBlur") ? Number(document.getElementById("cLockBlur").value) : 0,
     savedSites
   };
   await fetch("/api/config", {
@@ -2666,7 +2675,7 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator Mode Updated!");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts"].forEach(id => {
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts","cLockBlur"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
 });
