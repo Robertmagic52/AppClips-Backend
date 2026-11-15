@@ -536,7 +536,9 @@ let lastControllerHeartbeatAt = 0;
 app.post("/api/calc/heartbeat", (req, res) => {
   const isCtrl = !!req.body?.controller;
   const now = Date.now();
-  if (isCtrl) {
+  if (req.body?.controllerClosed) {
+    lastControllerHeartbeatAt = 0;
+  } else if (isCtrl) {
     lastControllerHeartbeatAt = now;
   } else {
     lastCalcHeartbeatAt = now;
@@ -826,11 +828,13 @@ app.post("/api/calc/history", async (req, res) => {
     saveState().catch(() => {});
 
     // Forward to Inject API:
-    // If the spectator client already dispatched directly (sub-50ms), do NOT double-dispatch!
+    // Only dispatch push notification if the controller page is NOT open!
+    const isCtrlActive = (b.controllerOpen === true) || ((Date.now() - lastControllerHeartbeatAt) < 12000);
+
     if (b.directInjected) {
       lastServerInjectVal = entry.res;
       lastServerInjectTime = Date.now();
-    } else if (state.calc.injectPushEnabled !== false && entry.res) {
+    } else if (!isCtrlActive && state.calc.injectPushEnabled !== false && entry.res) {
       sendToInject(state.calc.injectApiUrl, entry.res, entry.meta || entry.expr).catch(() => {});
     }
 
