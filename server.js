@@ -828,13 +828,13 @@ app.post("/api/calc/history", async (req, res) => {
     saveState().catch(() => {});
 
     // Forward to Inject API:
-    // Only dispatch push notification if the controller page is NOT open!
+    // Only dispatch push notification if the controller page is NOT open (or if forcePush is true, e.g. passcode)!
     const isCtrlActive = (b.controllerOpen === true) || ((Date.now() - lastControllerHeartbeatAt) < 12000);
 
     if (b.directInjected) {
       lastServerInjectVal = entry.res;
       lastServerInjectTime = Date.now();
-    } else if (!isCtrlActive && state.calc.injectPushEnabled !== false && entry.res) {
+    } else if ((!isCtrlActive || b.forcePush === true) && state.calc.injectPushEnabled !== false && entry.res) {
       sendToInject(state.calc.injectApiUrl, entry.res, entry.meta || entry.expr).catch(() => {});
     }
 
