@@ -85,7 +85,7 @@ const DEFAULT_CALC_MODES = {
   lockEmergencyUrl: "",
   lockEmergencyOpenSafari: true,
   lockBlur: 0,
-  lockGlassStyle: "crystal",
+  lockGlassStyle: "liquid",
   injectApiUrl: "https://11z.co/_w/19470/selection",
   injectPushEnabled: true
 };
@@ -380,7 +380,7 @@ app.post("/api/config", async (req, res) => {
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
   }
-  if (["crystal", "liquid", "backdrop", "aurakit"].includes(b.lockGlassStyle)) {
+  if (["crystal", "liquid", "backdrop"].includes(b.lockGlassStyle)) {
     state.calc.lockGlassStyle = b.lockGlassStyle;
   }
   if (typeof b.injectApiUrl === "string") state.calc.injectApiUrl = b.injectApiUrl.trim();
