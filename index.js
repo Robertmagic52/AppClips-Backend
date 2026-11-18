@@ -85,6 +85,7 @@ const DEFAULT_CALC_MODES = {
   lockEmergencyUrl: "",
   lockEmergencyOpenSafari: true,
   lockBlur: 0,
+  lockGlassStyle: "crystal",
   injectApiUrl: "https://11z.co/_w/19470/selection",
   injectPushEnabled: true
 };
@@ -378,6 +379,9 @@ app.post("/api/config", async (req, res) => {
   if ([1, 2, 3].includes(Number(b.lockAttemptsToUnlock))) state.calc.lockAttemptsToUnlock = Number(b.lockAttemptsToUnlock);
   if (isFinite(Number(b.lockBlur)) && Number(b.lockBlur) >= 0) {
     state.calc.lockBlur = Math.max(0, Math.min(80, Number(b.lockBlur)));
+  }
+  if (["crystal", "liquid", "backdrop", "aurakit"].includes(b.lockGlassStyle)) {
+    state.calc.lockGlassStyle = b.lockGlassStyle;
   }
   if (typeof b.injectApiUrl === "string") state.calc.injectApiUrl = b.injectApiUrl.trim();
   if (typeof b.injectPushEnabled === "boolean") state.calc.injectPushEnabled = b.injectPushEnabled;
