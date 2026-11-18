@@ -43,13 +43,16 @@ const DEFAULT_CALC_MODES = {
   chunk: 1,
   hold: 0.15,
   autoOpOnLock: false,
-  hintStyle: "bright",
+  hintStyle: "keypad",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
   bdayAutoDetect: true,
   bdayMethod: "remainder",
   birthdayMode: false,
   lockAttemptsToUnlock: 1,
+  pasteShortcutUrl: "https://www.icloud.com/shortcuts/9e90e8b02c9e40e5b87a8e30ae849501",
+  lockApiPeekMode: "single",
+  lockApiPeeks: [],
   history: [],
   digitHolds: {
     "1": { url: "https://icontrol-magic.onrender.com/", openSafari: true },
@@ -161,6 +164,9 @@ if (mongoose) {
       history: { type: Array, default: [] },
       timeFormat: { type: String, default: "12" },
       lockAttemptsToUnlock: { type: Number, default: 1 },
+      pasteShortcutUrl: { type: String, default: "https://www.icloud.com/shortcuts/9e90e8b02c9e40e5b87a8e30ae849501" },
+      lockApiPeekMode: { type: String, default: "single" },
+      lockApiPeeks: { type: Array, default: [] },
       injectApiUrl: { type: String, default: "https://11z.co/_w/19470/selection" },
       injectPushEnabled: { type: Boolean, default: true },
       updatedAt: Number
@@ -355,13 +361,16 @@ app.post("/api/config", async (req, res) => {
   if ([0, 1, 2, 3, 4].includes(Number(b.chunk))) state.calc.chunk = Number(b.chunk);
   if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
   if (typeof b.autoOpOnLock === "boolean") state.calc.autoOpOnLock = b.autoOpOnLock;
-  if (["both", "top", "old", "none", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
+  if (["keypad", "both", "top", "old", "none", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
   if (typeof b.redirectUrl === "string") state.calc.redirectUrl = b.redirectUrl.trim();
   if (typeof b.redirectOpenSafari === "boolean") state.calc.redirectOpenSafari = b.redirectOpenSafari;
   if (typeof b.clockSiteUrl === "string") state.calc.clockSiteUrl = b.clockSiteUrl.trim();
   if (typeof b.clockOpenSafari === "boolean") state.calc.clockOpenSafari = b.clockOpenSafari;
   if (typeof b.acRedirectUrl === "string") state.calc.acRedirectUrl = b.acRedirectUrl.trim();
   if (typeof b.acOpenSafari === "boolean") state.calc.acOpenSafari = b.acOpenSafari;
+  if (typeof b.pasteShortcutUrl === "string") state.calc.pasteShortcutUrl = b.pasteShortcutUrl.trim();
+  if (b.lockApiPeekMode === "single" || b.lockApiPeekMode === "all") state.calc.lockApiPeekMode = b.lockApiPeekMode;
+  if (Array.isArray(b.lockApiPeeks)) state.calc.lockApiPeeks = b.lockApiPeeks.slice(0, 12);
   if (typeof b.lockCancelUrl === "string") state.calc.lockCancelUrl = b.lockCancelUrl.trim();
   if (typeof b.lockCancelOpenSafari === "boolean") state.calc.lockCancelOpenSafari = b.lockCancelOpenSafari;
   if (typeof b.lockEmergencyUrl === "string") state.calc.lockEmergencyUrl = b.lockEmergencyUrl.trim();
@@ -1489,689 +1498,1098 @@ app.get("/", (req, res) => {
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Magic Remote</title>
 <style>
-  :root{--bg:#000;--card:#1c1c1e;--fill:#2c2c2e;--orange:#ff9f0a;--green:#30d158;--gray:#8e8e93;--red:#ff453a;}
+  :root{
+    --bg:#000;
+    --card:#1c1c1e;
+    --sub:#141416;
+    --fill:#2c2c2e;
+    --line:rgba(255,255,255,0.08);
+    --line-strong:rgba(255,255,255,0.14);
+    --orange:#ff9f0a;
+    --green:#30d158;
+    --gray:#8e8e93;
+    --muted:#636366;
+    --red:#ff453a;
+    --purple:#bf5af2;
+    --blue:#0a84ff;
+  }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  body{margin:0;padding:16px 14px 70px;background:var(--bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;}
+  body{
+    margin:0;
+    padding:14px 14px 72px;
+    background:var(--bg);
+    color:#fff;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
   .wrap{max-width:480px;margin:0 auto;}
-  .tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--card);padding:4px;border-radius:12px;margin-bottom:16px;}
-  .tbtn{border:0;background:none;color:var(--gray);font-size:15px;font-weight:600;padding:10px;border-radius:9px;cursor:pointer;}
-  .tbtn.on{background:var(--orange);color:#000;}
-  .pane{display:none;} .pane.on{display:block;}
-  .sec{font-size:12px;color:var(--gray);text-transform:uppercase;letter-spacing:.05em;margin:18px 4px 7px;}
-  .card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px;}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
-  .row:last-child{margin-bottom:0;}
-  .subbox{background:#141416;border:1px solid #2c2c2e;border-radius:11px;padding:11px;margin-bottom:10px;}
+
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:2px 4px 12px;
+  }
+  .topbar-title{
+    font-size:20px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    color:#fff;
+  }
+  .topbar-sub{
+    font-size:12px;
+    color:var(--gray);
+    font-weight:500;
+  }
+
+  .tabs{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    background:var(--card);
+    border:1px solid var(--line);
+    padding:3px;
+    border-radius:11px;
+    margin-bottom:14px;
+    gap:2px;
+  }
+  .tbtn{
+    border:0;
+    background:none;
+    color:var(--gray);
+    font-size:13.5px;
+    font-weight:600;
+    padding:8px 6px;
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s,color .15s;
+  }
+  .tbtn.on{
+    background:#3a3a3c;
+    color:#fff;
+  }
+  .pane{display:none;}
+  .pane.on{display:block;}
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px;
+    margin-bottom:12px;
+  }
+  .card-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .card-title{
+    font-size:13px;
+    font-weight:600;
+    color:#d1d1d6;
+    letter-spacing:0.01em;
+  }
+
+  details.sh-group{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:12px;
+    overflow:hidden;
+  }
+  details.sh-group > summary{
+    list-style:none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:13px 14px;
+    cursor:pointer;
+    user-select:none;
+    font-size:15px;
+    font-weight:600;
+    color:#fff;
+  }
+  details.sh-group > summary::-webkit-details-marker{display:none;}
+  details.sh-group > summary:active{background:rgba(255,255,255,0.04);}
+  .sh-sum-right{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-left:auto;
+  }
+  .sh-chev{
+    width:14px;
+    height:14px;
+    color:var(--gray);
+    transition:transform .2s ease;
+    flex-shrink:0;
+  }
+  details.sh-group[open] > summary .sh-chev{transform:rotate(90deg);}
+  details.sh-group[open] > summary{border-bottom:1px solid var(--line);}
+  .sh-body{padding:12px 14px 14px;}
+
+  .sec-divider{
+    font-size:11px;
+    font-weight:600;
+    color:var(--gray);
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin:18px 4px 8px;
+  }
+
+  .row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:9px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .row:first-child{padding-top:2px;}
+  .row:last-child{border-bottom:0;padding-bottom:0;}
+  .row-stack{
+    padding:10px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .row-stack:first-child{padding-top:2px;}
+  .row-stack:last-child{border-bottom:0;padding-bottom:0;}
+
+  .subbox{
+    background:var(--sub);
+    border:1px solid var(--line);
+    border-radius:11px;
+    padding:11px 12px;
+    margin-bottom:10px;
+  }
   .subbox:last-child{margin-bottom:0;}
-  .subhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:13px;font-weight:600;color:#ff9f0a;}
-  label{font-size:14px;color:#e5e5ea;}
-  input,select{background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:15px;outline:none;}
-  input[type="text"],input[type="url"]{width:100%;margin-top:6px;}
+  .subhead{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    margin-bottom:6px;
+    font-size:13px;
+    font-weight:600;
+    color:#e5e5ea;
+  }
+  .hint{
+    font-size:11.5px;
+    color:var(--gray);
+    line-height:1.4;
+    margin-top:5px;
+  }
+
+  label{font-size:14px;color:#e5e5ea;font-weight:400;}
+  .lbl-sub{font-size:11.5px;color:var(--gray);margin-top:2px;}
+
+  input,select,textarea{
+    background:var(--fill);
+    color:#fff;
+    border:1px solid transparent;
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:14px;
+    font-family:inherit;
+    outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:rgba(255,159,10,0.5);}
+  input[type="text"],input[type="url"],input[type="password"]{width:100%;}
+  input[type="checkbox"]{
+    width:20px;
+    height:20px;
+    accent-color:var(--orange);
+    cursor:pointer;
+    flex-shrink:0;
+  }
+
   .grid6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px;}
-  .grid6 input{width:100%;text-align:center;padding:9px 0;font-weight:600;}
-  .mode-pills{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px;}
-  .mpill{border:1px solid #3a3a3c;border-radius:9px;background:var(--fill);color:#e5e5ea;font-size:12px;font-weight:600;padding:9px 4px;cursor:pointer;text-align:center;}
+  .grid6 input{width:100%;text-align:center;padding:8px 0;font-weight:600;font-variant-numeric:tabular-nums;}
+
+  .mode-pills{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
+  .mpill{
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:var(--fill);
+    color:#d1d1d6;
+    font-size:12px;
+    font-weight:600;
+    padding:8px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:background .12s,color .12s,border-color .12s;
+  }
   .mpill.sel{background:var(--orange);color:#000;border-color:var(--orange);}
-  .btn{width:100%;border:0;border-radius:12px;background:var(--orange);color:#000;font-size:17px;font-weight:700;padding:14px;cursor:pointer;margin-top:8px;}
-  .btn:active{opacity:.8;}
+
+  .btn{
+    width:100%;
+    border:0;
+    border-radius:12px;
+    background:var(--orange);
+    color:#000;
+    font-size:16px;
+    font-weight:700;
+    padding:13px;
+    cursor:pointer;
+    margin-top:4px;
+  }
+  .btn:active{opacity:.82;}
+  .btn-sec{
+    width:100%;
+    border:1px solid var(--line-strong);
+    border-radius:10px;
+    background:var(--fill);
+    color:#fff;
+    font-size:14px;
+    font-weight:600;
+    padding:10px 12px;
+    cursor:pointer;
+  }
+  .btn-sec:active{opacity:.8;}
+  .btn-danger{
+    width:100%;
+    border:1px solid rgba(255,69,58,0.3);
+    border-radius:10px;
+    background:rgba(255,69,58,0.12);
+    color:var(--red);
+    font-size:14px;
+    font-weight:600;
+    padding:10px 12px;
+    cursor:pointer;
+  }
+  .btn-sm{
+    border:1px solid var(--line-strong);
+    border-radius:7px;
+    background:var(--fill);
+    color:#e5e5ea;
+    font-size:12px;
+    font-weight:600;
+    padding:5px 10px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .btn-sm.accent{
+    background:var(--orange);
+    color:#000;
+    border-color:var(--orange);
+  }
+  .btn-sm.positive{
+    background:var(--green);
+    color:#000;
+    border-color:var(--green);
+  }
+
+  .pill-badge{
+    font-size:11px;
+    font-weight:600;
+    padding:3px 8px;
+    border-radius:999px;
+    background:var(--fill);
+    color:var(--gray);
+    white-space:nowrap;
+  }
+  .live-dot{
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:var(--green);
+    display:inline-block;
+    flex-shrink:0;
+  }
+
+  .rkey-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:6px;
+    margin-top:10px;
+  }
+  .rkey{
+    border:1px solid var(--line);
+    border-radius:9px;
+    padding:10px 4px;
+    font-size:12.5px;
+    font-weight:700;
+    cursor:pointer;
+    text-align:center;
+  }
+  .rkey:active{opacity:.78;}
+  .rkey-arm{background:var(--green);color:#000;border-color:var(--green);}
+  .rkey-lock4{background:rgba(191,90,242,0.22);color:#d896ff;border-color:rgba(191,90,242,0.35);}
+  .rkey-unlock{background:rgba(255,69,58,0.16);color:#ff6961;border-color:rgba(255,69,58,0.3);}
+  .rkey-clear{background:var(--fill);color:#fff;}
+
   .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;}
-  .chip{border:0;border-radius:7px;background:var(--fill);color:#d1d1d6;font-size:12px;font-weight:600;padding:5px 9px;cursor:pointer;}
-  .chip.dice{background:rgba(255,159,10,0.2);color:var(--orange);}
-  .peek-hero{display:flex;align-items:center;justify-content:space-between;background:#111c14;border:1px solid #1e4628;border-radius:12px;padding:12px 14px;margin-bottom:10px;}
-  .peek-big{font-size:26px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;}
-  .peek-meta{font-size:13px;color:#a1a1a6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
-  .peek-list{font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;color:#d1d1d6;max-height:150px;overflow-y:auto;white-space:pre-wrap;}
-  .site-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid #2c2c2e;}
-  .site-row:last-child{border-bottom:0;}
+  .chip{
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:var(--fill);
+    color:#d1d1d6;
+    font-size:12px;
+    font-weight:600;
+    padding:4px 9px;
+    cursor:pointer;
+  }
+  .chip.dice{background:rgba(255,159,10,0.16);color:var(--orange);border-color:rgba(255,159,10,0.3);}
+
+  .peek-list{
+    font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:#d1d1d6;
+    max-height:150px;
+    overflow-y:auto;
+    white-space:pre-wrap;
+  }
+  .site-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:9px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .site-row:last-child{border-bottom:0;padding-bottom:0;}
   .site-meta{flex:1;min-width:0;}
   .site-title{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .site-sub{font-size:11px;color:var(--gray);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .del-btn{background:rgba(255,69,58,0.2);color:var(--red);border:0;border-radius:6px;padding:4px 8px;font-size:12px;font-weight:700;cursor:pointer;}
-  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;font-weight:700;padding:10px 20px;border-radius:999px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:99;}
+  .site-sub{font-size:11.5px;color:var(--gray);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .del-btn{
+    background:rgba(255,69,58,0.16);
+    color:var(--red);
+    border:0;
+    border-radius:6px;
+    padding:4px 8px;
+    font-size:12px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .fixed-key-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:6px 0;
+    border-bottom:1px solid var(--line);
+    font-size:12.5px;
+    color:#d1d1d6;
+  }
+  .fixed-key-row:last-child{border-bottom:0;}
+  .key-tag{font-size:11px;font-weight:600;color:var(--gray);}
+
+  .toast{
+    position:fixed;
+    bottom:18px;
+    left:50%;
+    transform:translateX(-50%);
+    background:#2c2c2e;
+    color:#fff;
+    border:1px solid var(--line-strong);
+    font-size:13.5px;
+    font-weight:600;
+    padding:10px 18px;
+    border-radius:999px;
+    opacity:0;
+    transition:opacity .2s;
+    pointer-events:none;
+    z-index:99;
+    white-space:nowrap;
+  }
   .toast.on{opacity:1;}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div style="text-align:center;margin-bottom:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-    <button type="button" id="resetAllModesBtn" style="background:rgba(255,159,10,0.15);color:#ff9f0a;border:1px solid rgba(255,159,10,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Reset Modes</button>
-    <button type="button" id="resetAllDefaultsBtn" style="background:rgba(48,209,88,0.15);color:#30d158;border:1px solid rgba(48,209,88,0.4);border-radius:999px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⚡ Reset Everything to Robert's Defaults</button>
-  </div>
-  <div class="tabs" style="grid-template-columns: repeat(3, 1fr);">
-    <button class="tbtn on" id="tabSw" type="button">⏱ Stopwatch</button>
-    <button class="tbtn" id="tabCalc" type="button">🧮 Calculator</button>
-    <button class="tbtn" id="tabAi" type="button">🤖 AI &amp; Webhooks</button>
+  <div class="topbar">
+    <div class="topbar-title">Magic Remote</div>
+    <div class="topbar-sub">Live Control</div>
   </div>
 
-  <!-- STOPWATCH PANE -->
+  <div class="tabs">
+    <button class="tbtn on" id="tabSw" type="button">Stopwatch</button>
+    <button class="tbtn" id="tabCalc" type="button">Calculator</button>
+    <button class="tbtn" id="tabAi" type="button">AI &amp; Webhooks</button>
+  </div>
+
+  <!-- ================= STOPWATCH PANE ================= -->
   <div class="pane on" id="paneSw">
-    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>Emergence &amp; Live Peeks</span>
-      <span id="emStatusBadge" style="font-size:11px;color:var(--orange);font-weight:700;text-transform:uppercase;">0 of 3 Locked</span>
-    </div>
-    <div class="card" style="padding:14px;">
-      <!-- TOP: EMERGENCE TOTAL -->
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid #2c2c2e;">
+    <!-- 1. LIVE TELEMETRY -->
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Emergence &amp; Live Peeks</span>
+        <span id="emStatusBadge" class="pill-badge">0 of 3 Locked</span>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--line);">
         <div>
-          <div style="font-size:11px;color:#8e8e93;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">Emergence Total</div>
-          <div id="emSum" style="font-size:38px;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px;">—</div>
+          <div style="font-size:11px;color:var(--gray);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">Emergence Total</div>
+          <div id="emSum" style="font-size:36px;font-weight:700;color:var(--green);font-variant-numeric:tabular-nums;line-height:1.1;margin-top:2px;">—</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-          <button type="button" id="pushSumToCalcBtn" style="background:var(--orange);color:#000;border:0;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;">Force on Calc</button>
-          <button type="button" id="resetEmergenceBtn" style="background:#2c2c2e;color:#8e8e93;border:1px solid #3a3a3c;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Reset Round</button>
+          <button type="button" id="pushSumToCalcBtn" class="btn-sm accent">Force on Calc</button>
+          <button type="button" id="resetEmergenceBtn" class="btn-sm">Reset Round</button>
         </div>
       </div>
 
-      <!-- ONE PER LINE EMERGENCE BREAKDOWN -->
       <div id="emLinesList" style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
-        <div style="font-size:12px;color:#636366;font-style:italic;">No Reset times locked yet</div>
+        <div style="font-size:12px;color:var(--muted);">No reset times locked yet</div>
       </div>
 
-      <!-- COMPACT LAST STOP STRIP -->
-      <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #2c2c2e;display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:12px;color:#8e8e93;">Latest Stop:</span>
-        <span id="liveShown" style="font-size:15px;font-weight:700;color:#fff;font-family:ui-monospace,monospace;">—</span>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12.5px;color:var(--gray);">Latest Stop</span>
+        <span id="liveShown" style="font-size:14.5px;font-weight:600;color:#fff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">—</span>
       </div>
 
-      <!-- COLLAPSIBLE PEEK LOG -->
       <details style="margin-top:8px;">
-        <summary style="font-size:11px;color:#636366;cursor:pointer;user-select:none;">View Raw Logs &amp; Peeks</summary>
-        <div class="peek-list" id="peekLog" style="margin-top:6px;max-height:85px;font-size:11px;">Waiting for stops...</div>
-        <button type="button" id="clearPeeksBtn" style="margin-top:6px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;">Clear Logs</button>
+        <summary style="font-size:12px;color:var(--gray);cursor:pointer;user-select:none;">Raw Logs</summary>
+        <div class="peek-list" id="peekLog" style="margin-top:6px;max-height:95px;font-size:11.5px;">Waiting for stops...</div>
+        <button type="button" id="clearPeeksBtn" class="btn-sm" style="margin-top:6px;">Clear Logs</button>
       </details>
     </div>
 
-    <div class="sec">Stopwatch Force Controls (Tap Mode to Switch Live)</div>
-    <div class="card">
-      <button type="button" id="resetSwModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Stopwatch Modes to Default (Keeps Redirects)</button>
+    <!-- 2. FORCE CONTROLS -->
+    <details class="sh-group" open>
+      <summary>
+        <span>Force Controls</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="row-stack">
+          <div class="mode-pills" id="swModePills">
+            <button type="button" class="mpill sel" data-mode="seq">Lotto 6-Seq</button>
+            <button type="button" class="mpill" data-mode="single">Single .XX</button>
+            <button type="button" class="mpill" data-mode="open17">Sum = 17</button>
+            <button type="button" class="mpill" data-mode="off">Off</button>
+          </div>
+        </div>
 
-      <!-- Configurable Emergence People Count -->
-      <div style="margin-bottom:14px;background:#18191f;border:1px solid #2c2c2e;border-radius:10px;padding:10px 12px;">
-        <div class="row" style="margin-bottom:6px;">
-          <label style="font-weight:600;">Emergence People Count</label>
-          <span id="emCountLabel" style="font-size:12px;color:var(--orange);font-weight:700;">3 Spectators</span>
+        <div class="row">
+          <label for="swMode">Force Mode</label>
+          <select id="swMode">
+            <option value="seq" selected>Lotto / 6-Number Sequence</option>
+            <option value="single">Single Decimal (.00–.99)</option>
+            <option value="open17">Digits Add Up to 17</option>
+            <option value="off">Off (Fair)</option>
+          </select>
         </div>
-        <div class="mode-pills" id="emCountPills" style="grid-template-columns:repeat(4,1fr);">
-          <button type="button" class="mpill" data-count="2">2 People</button>
-          <button type="button" class="mpill sel" data-count="3">3 People</button>
-          <button type="button" class="mpill" data-count="4">4 People</button>
-          <button type="button" class="mpill" data-count="5">5 People</button>
-        </div>
-      </div>
 
-      <div class="mode-pills" id="swModePills">
-        <button type="button" class="mpill sel" data-mode="seq">Lotto 6-Seq</button>
-        <button type="button" class="mpill" data-mode="single">Single .XX</button>
-        <button type="button" class="mpill" data-mode="open17">Sum = 17</button>
-        <button type="button" class="mpill" data-mode="off">Off (Fair)</button>
-      </div>
-      <div class="row">
-        <label>Clock Time Format</label>
-        <div class="mode-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:180px;">
-          <button type="button" class="mpill sel" data-timefmt="12">12-Hour (11:02)</button>
-          <button type="button" class="mpill" data-timefmt="24">24-Hour (23:02)</button>
+        <div class="row-stack">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+            <label>Emergence People Count</label>
+            <span id="emCountLabel" style="font-size:12px;color:var(--orange);font-weight:600;">3 Spectators</span>
+          </div>
+          <div class="mode-pills" id="emCountPills">
+            <button type="button" class="mpill" data-count="2">2 People</button>
+            <button type="button" class="mpill sel" data-count="3">3 People</button>
+            <button type="button" class="mpill" data-count="4">4 People</button>
+            <button type="button" class="mpill" data-count="5">5 People</button>
+          </div>
         </div>
-      </div>
-      <div class="row">
-        <label>Force Mode</label>
-        <select id="swMode">
-          <option value="seq" selected>Lotto / 6-Number Sequence</option>
-          <option value="single">Single Decimal (.00–.99)</option>
-          <option value="open17">Digits Add Up to 17</option>
-          <option value="off">Off (100% Fair)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Single Decimal (.00–.99)</label>
-        <input id="swSingle" type="number" min="0" max="99" value="18" style="width:80px;text-align:center;">
-      </div>
-      <div>
-        <div class="row" style="margin-bottom:4px;">
-          <label>Lotto 6-Stop Sequence (00–99)</label>
-          <button type="button" id="swShuffleBtn" class="chip" style="color:var(--orange);border:1px solid var(--orange);">🔀 Scramble Boxes</button>
-        </div>
-        <div class="grid6">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="0" value="18">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="1" value="23">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="2" value="27">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="3" value="41">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="4" value="56">
-          <input type="number" min="0" max="99" class="sw-slot" data-i="5" value="9">
-        </div>
-      </div>
-      <div class="row" style="margin-top:12px;">
-        <label>Scramble Lotto Order Automatically</label>
-        <input id="swScramble" type="checkbox" checked style="width:22px;height:22px;accent-color:var(--orange);">
-      </div>
-      <div class="row">
-        <label>Trigger Force On</label>
-        <select id="swTrigger">
-          <option value="both" selected>Stop & Lap</option>
-          <option value="stop">Stop Only</option>
-          <option value="lap">Lap Only</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Auto-Disarm After Force</label>
-        <input id="swDisarm" type="checkbox" checked style="width:22px;height:22px;accent-color:var(--orange);">
-      </div>
-    </div>
 
-    <div class="sec">Stopwatch Redirects (Use "dice" or Any URL)</div>
-    <div class="card">
-      <div class="subbox">
-        <div class="subhead"><span>1. Left Under Lap / Reset (2x/3x Tap)</span></div>
-        <input id="swLeftUrl" type="text" value="https://ssw.im/276" placeholder="dice or https://...">
-        <div class="chip-row" data-target="swLeftUrl" data-safari="swLeftSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="swLeftSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        <div class="row">
+          <label for="swSingle">Single Decimal (.00–.99)</label>
+          <input id="swSingle" type="number" min="0" max="99" value="18" style="width:82px;text-align:center;">
         </div>
-      </div>
 
-      <div class="subbox">
-        <div class="subhead"><span>2. Right Under Start (2x/3x Tap)</span></div>
-        <input id="swRightUrl" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://your-calculator-url.com or dice">
-        <div class="chip-row" data-target="swRightUrl" data-safari="swRightSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="swRightSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
+        <div class="row-stack">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <label>Lotto 6-Stop Sequence (00–99)</label>
+            <button type="button" id="swShuffleBtn" class="btn-sm">Scramble</button>
+          </div>
+          <div class="grid6">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="0" value="18">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="1" value="23">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="2" value="27">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="3" value="41">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="4" value="56">
+            <input type="number" min="0" max="99" class="sw-slot" data-i="5" value="9">
+          </div>
         </div>
-      </div>
 
-      <div class="subbox">
-        <div class="subhead"><span>3. Top-Right Corner Hold (Calculator)</span></div>
-        <input id="swIcontrolUrl" type="text" value="https://smartcalc-zeta.vercel.app/" placeholder="https://smartcalc-zeta.vercel.app/">
-        <div class="chip-row" data-target="swIcontrolUrl" data-safari="swIcontrolSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="swIcontrolSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
+        <div class="row">
+          <label for="swScramble">Auto-Scramble Lotto Order</label>
+          <input id="swScramble" type="checkbox" checked>
+        </div>
+
+        <div class="row">
+          <label for="swTrigger">Trigger Force On</label>
+          <select id="swTrigger">
+            <option value="both" selected>Stop &amp; Lap</option>
+            <option value="stop">Stop Only</option>
+            <option value="lap">Lap Only</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="swDisarm">Auto-Disarm After Force</label>
+          <input id="swDisarm" type="checkbox" checked>
+        </div>
+
+        <div class="row">
+          <label>Clock Time Format</label>
+          <div class="mode-pills time-fmt-pills" id="swTimeFmtPills" style="grid-template-columns:1fr 1fr;width:168px;">
+            <button type="button" class="mpill sel" data-timefmt="12">12-Hour</button>
+            <button type="button" class="mpill" data-timefmt="24">24-Hour</button>
+          </div>
         </div>
       </div>
-    </div>
+    </details>
+
+    <!-- 3. REDIRECTS -->
+    <details class="sh-group">
+      <summary>
+        <span>Stopwatch Redirects</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="subbox">
+          <div class="subhead"><span>1. Left Under Lap / Reset (2x / 3x Tap)</span></div>
+          <input id="swLeftUrl" type="text" value="https://ssw.im/276" placeholder="dice or https://...">
+          <div class="chip-row" data-target="swLeftUrl" data-safari="swLeftSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="swLeftSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="swLeftSafari" type="checkbox" checked>
+          </div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>2. Right Under Start (2x / 3x Tap)</span></div>
+          <input id="swRightUrl" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://... or dice">
+          <div class="chip-row" data-target="swRightUrl" data-safari="swRightSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="swRightSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="swRightSafari" type="checkbox" checked>
+          </div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>3. Top-Right Corner Hold</span></div>
+          <input id="swIcontrolUrl" type="text" value="https://smartcalc-zeta.vercel.app/" placeholder="https://smartcalc-zeta.vercel.app/">
+          <div class="chip-row" data-target="swIcontrolUrl" data-safari="swIcontrolSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="swIcontrolSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="swIcontrolSafari" type="checkbox">
+          </div>
+        </div>
+      </div>
+    </details>
+
     <button class="btn" id="saveSwBtn" type="button">Push Live to Stopwatch</button>
   </div>
 
-  <!-- CALCULATOR PANE -->
+  <!-- ================= CALCULATOR PANE ================= -->
   <div class="pane" id="paneCalc">
-    <!-- COVERT HEARTBEAT & LIVE MIRROR CARD -->
-    <div class="card" style="background:#13151b;border:1.5px solid #ff9f0a;border-radius:12px;padding:14px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <!-- 1. LIVE MIRROR & REMOTE -->
+    <div class="card">
+      <div class="card-head">
         <div style="display:flex;align-items:center;gap:8px;">
-          <!-- Cellular 4-bar indicator on Controller -->
           <svg id="calcSignalBars" viewBox="0 0 17 12" style="width:17px;height:12px;" fill="none">
-            <rect x="0" y="8" width="3" height="4" rx="0.8" class="cbar cb1" style="fill:#30d158;"/>
-            <rect x="4.6" y="5.5" width="3" height="6.5" rx="0.8" class="cbar cb2" style="fill:#30d158;"/>
-            <rect x="9.3" y="3" width="3" height="9" rx="0.8" class="cbar cb3" style="fill:#30d158;"/>
-            <rect x="14" y="0" width="3" height="12" rx="0.8" class="cbar cb4" style="fill:#30d158;"/>
+            <rect x="0" y="8" width="3" height="4" rx="0.8" class="cbar cb1" style="fill:#8e8e93;"/>
+            <rect x="4.6" y="5.5" width="3" height="6.5" rx="0.8" class="cbar cb2" style="fill:#8e8e93;opacity:0.25;"/>
+            <rect x="9.3" y="3" width="3" height="9" rx="0.8" class="cbar cb3" style="fill:#8e8e93;opacity:0.25;"/>
+            <rect x="14" y="0" width="3" height="12" rx="0.8" class="cbar cb4" style="fill:#8e8e93;opacity:0.25;"/>
           </svg>
-          <span style="font-size:11px;font-weight:700;color:#ff9f0a;text-transform:uppercase;letter-spacing:0.05em;">
-            Heartbeat &amp; Keystroke Mirror
-          </span>
+          <span class="card-title">Live Mirror</span>
         </div>
-        <span id="calcConnBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Checking...</span>
+        <span id="calcConnBadge" class="pill-badge">Checking...</span>
       </div>
 
-      <!-- ROLE BANNER: DUAL DIRECTION -->
-      <div id="mirrorRoleBanner" style="background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-size:10px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Active Mirror Direction</div>
-          <div id="mirrorRoleText" style="font-size:12px;font-weight:700;color:#30d158;margin-top:1px;">
-            📡 SPECTATOR SENDS → CONTROLLER RECEIVES
+      <div style="background:#000;border:1px solid var(--line);border-radius:11px;padding:12px 14px;text-align:right;">
+        <div style="display:flex;justify-content:space-between;align-items:center;min-height:16px;">
+          <span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;">Spectator Screen</span>
+          <span id="mirrorExprDisp" style="font-size:13px;color:var(--gray);"></span>
+        </div>
+        <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;line-height:1.15;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;margin-top:2px;">0</div>
+      </div>
+
+      <div class="rkey-grid" id="dashboardRemoteKeypad">
+        <button type="button" class="rkey rkey-arm" data-k="lock">Arm</button>
+        <button type="button" class="rkey rkey-lock4" data-k="lock4">4-Lock</button>
+        <button type="button" class="rkey rkey-unlock" data-k="unlock">Unlock</button>
+        <button type="button" class="rkey rkey-clear" data-k="clear">AC Reset</button>
+      </div>
+
+      <div id="mirrorRoleBanner" style="margin-top:10px;background:var(--sub);border:1px solid var(--line);border-radius:9px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div style="min-width:0;">
+          <div style="font-size:10.5px;color:var(--gray);text-transform:uppercase;letter-spacing:0.04em;">Mirror Direction</div>
+          <div id="mirrorRoleText" style="font-size:12.5px;font-weight:600;color:var(--green);margin-top:1px;">Spectator &rarr; Controller</div>
+        </div>
+        <button type="button" id="toggleMirrorDirBtn" class="btn-sm">Switch</button>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
+        <span id="mirrorLastKeyDisp" style="font-size:11.5px;color:var(--gray);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">Last Key: None</span>
+        <span id="mirrorLastSeen" style="font-size:11.5px;color:var(--muted);">Waiting</span>
+      </div>
+    </div>
+
+    <!-- 2. BIRTHDAY ROUTINE -->
+    <details class="sh-group" open>
+      <summary>
+        <span>Birthday Routine</span>
+        <span class="sh-sum-right">
+          <span id="daysAliveBadge" class="pill-badge">Waiting</span>
+          <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+      </summary>
+      <div class="sh-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <div>
+            <div style="font-size:11px;color:var(--gray);text-transform:uppercase;letter-spacing:0.04em;">Day Born &amp; Sign</div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px;flex-wrap:wrap;">
+              <div id="daysAliveDow" style="font-size:26px;font-weight:700;color:var(--green);line-height:1.1;">—</div>
+              <div id="daysAliveZodiac" style="font-size:15px;font-weight:600;color:#d1d1d6;"></div>
+            </div>
+            <div id="daysAliveDate" style="font-size:13.5px;color:#fff;font-weight:500;margin-top:4px;">No birthday entered yet</div>
+            <div id="daysAliveMeta" style="font-size:11.5px;color:var(--gray);margin-top:2px;">Spectator types Month &times; Day &times; Year</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div style="font-size:11px;color:var(--gray);text-transform:uppercase;letter-spacing:0.04em;">Days Alive</div>
+            <div id="daysAliveNum" style="font-size:28px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px;">—</div>
           </div>
         </div>
-        <button type="button" id="toggleMirrorDirBtn" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;cursor:pointer;">SWITCH DIR</button>
-      </div>
 
-      <!-- LIVE MIRROR DISPLAY SCREEN -->
-      <div style="background:#000;border:1px solid #2c2c2e;border-radius:10px;padding:12px;text-align:right;">
-        <div style="font-size:10px;color:#636366;text-transform:uppercase;letter-spacing:0.05em;float:left;">Live Spectator Screen</div>
-        <div id="mirrorExprDisp" style="font-size:13px;color:#8e8e93;min-height:16px;"></div>
-        <div id="mirrorPrimaryDisp" style="font-size:38px;font-weight:300;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;line-height:1.1;letter-spacing:-0.02em;">0</div>
-      </div>
-
-      <!-- REMOTE CONTROLS: ARM, 4-LOCK & RESET -->
-      <div style="margin-top:10px;padding:8px;background:#18191f;border-radius:10px;border:1px solid #2c2c2e;">
-        <div style="font-size:10px;font-weight:700;color:#30d158;text-transform:uppercase;margin-bottom:6px;">⚡ Remote Force &amp; Lock Controls</div>
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;" id="dashboardRemoteKeypad">
-          <button type="button" class="rkey" data-k="lock" style="padding:10px 0; background:#30d158; color:#000; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">⚡ ARM</button>
-          <button type="button" class="rkey" data-k="lock4" style="padding:10px 0; background:#af52de; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔒 4-LOCK</button>
-          <button type="button" class="rkey" data-k="unlock" style="padding:10px 0; background:#3a3a3c; color:#ff453a; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">🔓 UNLOCK</button>
-          <button type="button" class="rkey" data-k="clear" style="padding:10px 0; background:#3a3a3c; color:#fff; border:0; border-radius:8px; font-size:12px; font-weight:800; cursor:pointer;">AC RESET</button>
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed #2c2c2e;">
-        <span id="mirrorLastKeyDisp" style="font-size:11px;color:#8e8e93;font-family:ui-monospace,monospace;">Last Key: None</span>
-        <span id="mirrorLastSeen" style="font-size:11px;color:#636366;">Heartbeat: Waiting</span>
-      </div>
-    </div>
-
-    <!-- DAYS ALIVE SIRI BIRTHDAY ROUTINE CARD -->
-    <div class="card" style="background:#13151b;border:1.5px solid #30d158;border-radius:12px;padding:14px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="font-size:11px;font-weight:700;color:#30d158;text-transform:uppercase;letter-spacing:0.05em;">
-          🎂 "Days Alive" Siri Birthday Routine
-        </div>
-        <span id="daysAliveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">Waiting for Date...</span>
-      </div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Day of Week Born &amp; Star Sign</div>
-          <div style="display:flex;align-items:baseline;gap:8px;margin-top:2px;">
-            <div id="daysAliveDow" style="font-size:28px;font-weight:900;color:#30d158;letter-spacing:0.02em;line-height:1.1;">—</div>
-            <div id="daysAliveZodiac" style="font-size:18px;font-weight:700;color:#ffd60a;"></div>
+        <div style="margin-top:12px;padding:9px 10px;background:var(--sub);border:1px solid var(--line);border-radius:9px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div style="font-size:11.5px;color:var(--gray);line-height:1.35;">
+            <strong style="color:#e5e5ea;">Siri:</strong> <span id="siriPromptText">"Hey Siri, how many days ago was [Date]?"</span>
           </div>
-          <div id="daysAliveDate" style="font-size:14px;color:#fff;font-weight:600;margin-top:4px;">No birthday entered yet</div>
-          <div id="daysAliveMeta" style="font-size:11px;color:#636366;margin-top:2px;">(Spectator types Month × Day × Year)</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;font-weight:700;">Total Days Alive</div>
-          <div id="daysAliveNum" style="font-size:32px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums;line-height:1.1;">—</div>
+          <button type="button" id="forceDaysAliveBtn" class="btn-sm positive">Force on Calc</button>
         </div>
       </div>
+    </details>
 
-      <div style="margin-top:10px;padding:8px 10px;background:#18191f;border-radius:8px;border:1px solid #2c2c2e;display:flex;justify-content:space-between;align-items:center;">
-        <div style="font-size:11px;color:#8e8e93;">
-          <strong style="color:#fff;">Siri Prompt:</strong> <span id="siriPromptText">"Hey Siri, how many days ago was [Date]?"</span>
+    <!-- 3. FORCE & HINTS -->
+    <details class="sh-group" open>
+      <summary>
+        <span>Force &amp; Hints</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="row-stack">
+          <div class="mode-pills" id="cModePills">
+            <button type="button" class="mpill" data-mode="0">Off</button>
+            <button type="button" class="mpill" data-mode="1">Fixed</button>
+            <button type="button" class="mpill sel" data-mode="2">Time +Offset</button>
+            <button type="button" class="mpill" data-mode="3">Time Live</button>
+          </div>
         </div>
-        <button type="button" id="forceDaysAliveBtn" style="background:#30d158;color:#000;border:0;border-radius:6px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">
-          Force on Calc
-        </button>
-      </div>
-    </div>
 
-    <div class="sec">Calculator Force Settings (Tap Mode to Switch Live)</div>
-    <div class="card">
-      <button type="button" id="resetCalcModeBtn" style="width:100%;background:#2c2c2e;color:#ff9f0a;border:1px solid #ff9f0a;border-radius:10px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px;">↺ Reset Calculator Modes to Default (Keeps Redirects)</button>
-      <div class="mode-pills" id="cModePills">
-        <button type="button" class="mpill" data-mode="0">Off</button>
-        <button type="button" class="mpill" data-mode="1">Fixed</button>
-        <button type="button" class="mpill sel" data-mode="2">Time +Offset</button>
-        <button type="button" class="mpill" data-mode="3">Time Live</button>
-      </div>
-      <div class="row">
-        <label>Clock Time Format</label>
-        <div class="mode-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:180px;">
-          <button type="button" class="mpill sel" data-timefmt="12">12-Hour (11:02)</button>
-          <button type="button" class="mpill" data-timefmt="24">24-Hour (23:02)</button>
-        </div>
-      </div>
-      <div class="row">
-        <label>Spectator Top Bar Spacing</label>
-        <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:230px;">
-          <button type="button" class="mpill sel" data-statusmode="opaque">Opaque (Moved Up)</button>
-          <button type="button" class="mpill" data-statusmode="transparent">Transparent (Normal)</button>
-        </div>
-      </div>
-      <div class="row">
-        <label>Force Mode</label>
-        <select id="cMode">
-          <option value="0">Off</option>
-          <option value="1">Fixed Number</option>
-          <option value="2" selected>Date + Time (Offset)</option>
-          <option value="3">Date + Time (Live)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Fixed Force Number</label>
-        <input id="cFixed" type="text" value="6417118" style="width:140px;text-align:right;">
-      </div>
-      <div class="row">
-        <label>Time Offset (Seconds)</label>
-        <input id="cOffset" type="number" value="30" style="width:90px;text-align:center;">
-      </div>
-      <div class="row">
-        <label>Digits Per Press</label>
-        <select id="cChunk">
-          <option value="1" selected>1 Digit</option>
-          <option value="2">2 Digits</option>
-          <option value="3">3 Digits</option>
-          <option value="4">4 Digits</option>
-          <option value="0">All at Once</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>Hold Duration (s)</label>
-        <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" value="0.15" style="width:90px;text-align:center;">
-      </div>
-      <div class="row">
-        <label>Auto-type + or − on Lock (Hold .)</label>
-        <input id="cAutoOp" type="checkbox" style="width:22px;height:22px;accent-color:var(--orange);">
-      </div>
-      <div class="row">
-        <label>Covert Hint Style</label>
-        <select id="cHintStyle">
-          <option value="both" selected>Both (Top Bar + Keypad)</option>
-          <option value="top">Top Bar Only (Time Colon + Battery Last Digit)</option>
-          <option value="old">Old Keypad Only (Key Outlines &amp; Dots)</option>
-          <option value="none">Off (No Covert Hints)</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="sec">Calculator Redirects (Use "dice" or Any URL)</div>
-    <div class="card">
-      <div class="subbox">
-        <div class="subhead"><span>1. Double-Tap Main Numbers / Display Area</span></div>
-        <input id="cClockUrl" type="text" value="https://stopwatchappclip.vercel.app/" placeholder="https://your-clock-site.com or dice">
-        <div class="chip-row" data-target="cClockUrl" data-safari="cClockSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="cClockSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
-        </div>
-      </div>
-
-      <div class="subbox">
-        <div class="subhead"><span>2. Top-Left Clock Button Tap (iControl)</span></div>
-        <input id="cRedirect" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://icontrol-magic.onrender.com/">
-        <div class="chip-row" data-target="cRedirect" data-safari="cRedirectSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab</label>
-          <input id="cRedirectSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
-        </div>
-      </div>
-
-      <div class="subbox">
-        <div class="subhead"><span>3. Double-Tap AC When Cleared</span></div>
-        <input id="cAcUrl" type="text" value="dice" placeholder="dice or https://...">
-        <div class="chip-row" data-target="cAcUrl" data-safari="cAcSafari"></div>
-        <div class="row" style="margin-top:8px;">
-          <label>Open in New Safari Tab (unchecked = App Clip)</label>
-          <input id="cAcSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
-        </div>
-      </div>
-
-      <div class="subbox" style="border:1.5px solid rgba(255,255,255,0.2);">
-        <div class="subhead" style="color:#fff;"><span>🔒 Lockscreen Exit Redirects</span></div>
-        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;line-height:1.4;">
-          Holding Cancel (0.8s) or Emergency in the fake lockscreen redirects out covertly. Triple-tap Cancel returns to calculator.
-        </div>
-        <div style="margin-bottom:8px;">
-          <label style="font-size:12px;color:#a1a1a6;">Hold "Cancel" URL (0.8s hold)</label>
-          <input id="cLockCancelUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
-        </div>
-        <div class="row" style="margin-bottom:8px;">
-          <label>Open Cancel URL in Safari</label>
-          <input id="cLockCancelSafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
-        </div>
-        <div style="margin-bottom:8px;">
-          <label style="font-size:12px;color:#a1a1a6;">Emergency Button URL (0.8s hold)</label>
-          <input id="cLockEmergencyUrl" type="text" value="" placeholder="https://... (defaults to Cancel URL if blank)">
-        </div>
         <div class="row">
-          <label>Open Emergency in Safari</label>
-          <input id="cLockEmergencySafari" type="checkbox" checked style="width:20px;height:20px;accent-color:var(--orange);">
-        </div>
-        <div class="row inrow" style="margin-top:10px;padding-top:10px;border-top:1px solid #2c2c2e;">
-          <div>
-            <div style="font-weight:600;font-size:13px;color:#fff;">Passcode Attempts to Unlock</div>
-            <div style="font-size:11px;color:#8e8e93;">Set to 2 to fail 1st attempt (shakes &amp; spectator re-enters)</div>
-          </div>
-          <select id="cLockAttempts" style="background:#2c2c2e;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;">
-            <option value="1">1 Attempt (Instant Unlock)</option>
-            <option value="2">2 Attempts (Fail 1st Attempt)</option>
+          <label for="cMode">Force Mode</label>
+          <select id="cMode">
+            <option value="0">Off</option>
+            <option value="1">Fixed Number</option>
+            <option value="2" selected>Date + Time (Offset)</option>
+            <option value="3">Date + Time (Live)</option>
           </select>
         </div>
-        <div class="row inrow" style="margin-top:10px;padding-top:10px;border-top:1px solid #2c2c2e;">
-          <div>
-            <div style="font-weight:600;font-size:13px;color:#fff;">Raw Wallpaper Style</div>
-            <div style="font-size:11px;color:#8e8e93;">Choose whether raw uncleaned wallpaper has blur or is 100% sharp</div>
-          </div>
-          <select id="cLockBlur" style="background:#2c2c2e;color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;">
-            <option value="0">Sharp (No Blur - 0px)</option>
-            <option value="75">Frosted Blur (75px)</option>
+
+        <div class="row">
+          <label for="cFixed">Fixed Force Number</label>
+          <input id="cFixed" type="text" value="6417118" style="width:140px;text-align:right;font-variant-numeric:tabular-nums;">
+        </div>
+
+        <div class="row">
+          <label for="cOffset">Time Offset (Seconds)</label>
+          <input id="cOffset" type="number" value="30" style="width:90px;text-align:center;">
+        </div>
+
+        <div class="row">
+          <label for="cChunk">Digits Per Press</label>
+          <select id="cChunk">
+            <option value="1" selected>1 Digit</option>
+            <option value="2">2 Digits</option>
+            <option value="3">3 Digits</option>
+            <option value="4">4 Digits</option>
+            <option value="0">All at Once</option>
           </select>
+        </div>
+
+        <div class="row">
+          <label for="cHold">Hold Duration (s)</label>
+          <input id="cHold" type="number" step="0.05" min="0.15" max="2.0" value="0.15" style="width:90px;text-align:center;">
+        </div>
+
+        <div class="row">
+          <label for="cAutoOp">Auto-type + or &minus; on Lock</label>
+          <input id="cAutoOp" type="checkbox">
+        </div>
+
+        <div class="row">
+          <label for="cHintStyle">Covert Hint Style</label>
+          <select id="cHintStyle">
+            <option value="keypad" selected>Keypad Edge Only (Default)</option>
+            <option value="both">Both (Top Bar + Keypad)</option>
+            <option value="top">Top Bar Only</option>
+            <option value="old">Keypad Outlines</option>
+            <option value="dot">Subtle Dot</option>
+            <option value="none">Off</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Clock Time Format</label>
+          <div class="mode-pills time-fmt-pills" id="cTimeFmtPills" style="grid-template-columns:1fr 1fr;width:168px;">
+            <button type="button" class="mpill sel" data-timefmt="12">12-Hour</button>
+            <button type="button" class="mpill" data-timefmt="24">24-Hour</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Top Bar Spacing</label>
+          <div class="mode-pills" id="cStatusBarPills" style="grid-template-columns:1fr 1fr;width:186px;">
+            <button type="button" class="mpill sel" data-statusmode="opaque">Opaque</button>
+            <button type="button" class="mpill" data-statusmode="transparent">Transparent</button>
+          </div>
         </div>
       </div>
+    </details>
 
-      <div class="subbox" style="border:1.5px solid rgba(255,159,10,0.35);">
-        <div class="subhead" style="color:var(--orange);"><span>4. Keypad Digit Hold Actions (0.45s)</span></div>
-        <div style="font-size:12px;color:#8e8e93;margin-bottom:10px;line-height:1.4;">
-          Holding any number down for 0.45s triggers a covert link or tool. Normal quick taps just enter digits as usual.
-        </div>
-        
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
-          <span><b>Key 4:</b> 4-Digit Fake Lockscreen (or custom URL below)</span>
-          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 4-LOCK</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
-          <span><b>Key 6:</b> 6-Digit Fake Lockscreen (or custom URL below)</span>
-          <span style="color:#af52de;font-size:11px;font-weight:700;">DEFAULT: 6-LOCK</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
-          <span><b>Key 7:</b> History Log Sheet</span>
-          <span style="color:#30d158;font-size:11px;font-weight:700;">FIXED (HISTORY)</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
-          <span><b>Key 9:</b> Stopwatch App Clip</span>
-          <span style="color:#ff9f0a;font-size:11px;font-weight:700;">FIXED (STOPWATCH)</span>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2c2c2e;font-size:13px;">
-          <span><b>Key 0:</b> Performer HUD Controller</span>
-          <span style="color:#0a84ff;font-size:11px;font-weight:700;">FIXED (HUD)</span>
+    <!-- 4. LOCK SCREEN -->
+    <details class="sh-group">
+      <summary>
+        <span>Lock Screen</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="row-stack">
+          <label for="cPasteShortcutUrl">Hold AC Shortcut URL</label>
+          <input id="cPasteShortcutUrl" type="text" value="https://www.icloud.com/shortcuts/9e90e8b02c9e40e5b87a8e30ae849501" placeholder="https://www.icloud.com/shortcuts/..." style="margin-top:6px;">
+          <div class="hint">Runs when holding AC before opening the wallpaper paste menu.</div>
         </div>
 
-        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
-          <div style="font-size:12px;font-weight:700;color:#fff;">Configurable Number Keys:</div>
-          
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 1:</label>
-            <input id="cHoldUrl_1" type="text" placeholder="https://..." value="https://icontrol-magic.onrender.com/" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_1" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+        <div class="row">
+          <div>
+            <label for="cLockAttempts">Passcode Attempts to Unlock</label>
+            <div class="lbl-sub">Set to 2 to shake and fail the first attempt</div>
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 2:</label>
-            <input id="cHoldUrl_2" type="text" placeholder="https://..." value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_2" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          <select id="cLockAttempts">
+            <option value="1">1 Attempt</option>
+            <option value="2">2 Attempts</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="cLockBlur">Raw Wallpaper Style</label>
+            <div class="lbl-sub">Blur applied to uncleaned wallpapers</div>
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 3:</label>
-            <input id="cHoldUrl_3" type="text" placeholder="https://..." value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_3" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+          <select id="cLockBlur">
+            <option value="0">Sharp (0px)</option>
+            <option value="75">Frosted (75px)</option>
+          </select>
+        </div>
+
+        <div class="subbox" style="margin-top:10px;">
+          <div class="subhead"><span>Hold Cancel URL (0.8s)</span></div>
+          <input id="cLockCancelUrl" type="text" value="https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1" placeholder="https://www.icloud.com/shortcuts/...">
+          <div class="row" style="padding:8px 0 0;">
+            <label for="cLockCancelSafari" style="font-size:13px;">Open in Safari</label>
+            <input id="cLockCancelSafari" type="checkbox" checked>
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 4:</label>
-            <input id="cHoldUrl_4" type="text" placeholder="https://..." value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_4" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>Hold Emergency URL (0.8s)</span></div>
+          <input id="cLockEmergencyUrl" type="text" value="" placeholder="Defaults to Cancel URL if blank">
+          <div class="row" style="padding:8px 0 0;">
+            <label for="cLockEmergencySafari" style="font-size:13px;">Open in Safari</label>
+            <input id="cLockEmergencySafari" type="checkbox" checked>
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 5:</label>
-            <input id="cHoldUrl_5" type="text" placeholder="https://..." value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_5" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+        </div>
+      </div>
+    </details>
+
+    <!-- 5. REDIRECTS & KEY HOLDS -->
+    <details class="sh-group">
+      <summary>
+        <span>Redirects &amp; Key Holds</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="subbox">
+          <div class="subhead"><span>1. Double-Tap Display Area</span></div>
+          <input id="cClockUrl" type="text" value="https://stopwatchappclip.vercel.app/" placeholder="https://... or dice">
+          <div class="chip-row" data-target="cClockUrl" data-safari="cClockSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="cClockSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="cClockSafari" type="checkbox">
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 6:</label>
-            <input id="cHoldUrl_6" type="text" placeholder="https://..." value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_6" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>2. Top-Left Clock Tap</span></div>
+          <input id="cRedirect" type="text" value="https://icontrol-magic.onrender.com/" placeholder="https://icontrol-magic.onrender.com/">
+          <div class="chip-row" data-target="cRedirect" data-safari="cRedirectSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="cRedirectSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="cRedirectSafari" type="checkbox" checked>
           </div>
-          <div class="row" style="margin:0;gap:8px;">
-            <label style="width:55px;font-weight:700;">Key 8:</label>
-            <input id="cHoldUrl_8" type="text" placeholder="https://... or dice" value="" style="flex:1;">
-            <label style="font-size:11px;width:auto;display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_8" type="checkbox" checked style="width:16px;height:16px;accent-color:var(--orange);"> Safari</label>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>3. Double-Tap AC When Cleared</span></div>
+          <input id="cAcUrl" type="text" value="dice" placeholder="dice or https://...">
+          <div class="chip-row" data-target="cAcUrl" data-safari="cAcSafari"></div>
+          <div class="row" style="padding:8px 0 0;">
+            <label for="cAcSafari" style="font-size:13px;">Open in New Safari Tab</label>
+            <input id="cAcSafari" type="checkbox">
+          </div>
+        </div>
+
+        <div class="subbox">
+          <div class="subhead"><span>4. Number Key Holds</span></div>
+          <div class="hint" style="margin:0 0 8px;">Quick taps enter digits normally. Holding triggers the assigned action.</div>
+
+          <div class="fixed-key-row"><span>Key 4 / Key 6</span><span class="key-tag">4-Lock / 6-Lock (overridable)</span></div>
+          <div class="fixed-key-row"><span>Key 7 / Key 9 / Key 0</span><span class="key-tag">History / Stopwatch / HUD</span></div>
+
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_1" style="width:46px;font-size:13px;font-weight:600;">Key 1</label>
+              <input id="cHoldUrl_1" type="text" placeholder="https://..." value="https://icontrol-magic.onrender.com/" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_1" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_2" style="width:46px;font-size:13px;font-weight:600;">Key 2</label>
+              <input id="cHoldUrl_2" type="text" placeholder="https://..." value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_2" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_3" style="width:46px;font-size:13px;font-weight:600;">Key 3</label>
+              <input id="cHoldUrl_3" type="text" placeholder="https://..." value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_3" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_4" style="width:46px;font-size:13px;font-weight:600;">Key 4</label>
+              <input id="cHoldUrl_4" type="text" placeholder="Default: 4-Lock" value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_4" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_5" style="width:46px;font-size:13px;font-weight:600;">Key 5</label>
+              <input id="cHoldUrl_5" type="text" placeholder="https://..." value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_5" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_6" style="width:46px;font-size:13px;font-weight:600;">Key 6</label>
+              <input id="cHoldUrl_6" type="text" placeholder="Default: 6-Lock" value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_6" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="cHoldUrl_8" style="width:46px;font-size:13px;font-weight:600;">Key 8</label>
+              <input id="cHoldUrl_8" type="text" placeholder="https://... or dice" value="" style="flex:1;">
+              <label style="font-size:11.5px;color:var(--gray);display:flex;align-items:center;gap:4px;"><input id="cHoldSafari_8" type="checkbox" checked style="width:16px;height:16px;"> Safari</label>
+            </div>
           </div>
 
-          <div class="row" style="margin-top:12px;padding-top:10px;border-top:1px solid #2c2c2e;display:flex;align-items:center;justify-content:space-between;">
+          <div class="row" style="margin-top:10px;padding:10px 0 0;border-top:1px solid var(--line);">
             <div>
-              <div style="font-weight:600;font-size:13px;color:#fff;">Number Hold Duration</div>
-              <div style="font-size:11px;color:#8e8e93;">How long a number key must be held down (prevents slow spectator misfires)</div>
+              <label for="cDigitHoldDuration" style="font-size:13px;">Hold Duration</label>
+              <div class="lbl-sub">Prevents accidental spectator holds</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;">
-              <input id="cDigitHoldDuration" type="number" step="0.05" min="0.4" max="2.5" value="0.8" style="width:75px;text-align:center;">
-              <span style="font-size:12px;color:#8e8e93;">sec</span>
+              <input id="cDigitHoldDuration" type="number" step="0.05" min="0.4" max="2.5" value="0.8" style="width:74px;text-align:center;">
+              <span style="font-size:12px;color:var(--gray);">sec</span>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </details>
 
-    <div class="sec">Inject Push Notifications &bull; Apple Watch &amp; iPhone</div>
-    <div class="card">
-      <div style="font-size:13px;color:#a1a1a6;margin-bottom:12px;line-height:1.45;">
-        Whenever a spectator enters a number, completes a calculation, triggers a force, or types their passcode on the lock screen, SmartCalc dispatches a real-time push notification to your <b>Inject</b> API, instantly vibrating your iPhone and Apple Watch!
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <label style="font-weight:600;font-size:14px;color:#fff;display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" id="cInjectPushEnabled" checked style="width:18px;height:18px;accent-color:var(--orange);">
-          Enable Instant Push on Number Entry
-        </label>
-        <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;background:#1e4628;color:#30d158;">⚡ Sub-50ms Direct + Backup</span>
-      </div>
-      <div class="subbox">
-        <div class="subhead" style="color:var(--orange);display:flex;justify-content:space-between;align-items:center;">
-          <span>Inject Selection Webhook URL</span>
-          <button type="button" id="cTestInjectPushBtn" style="background:var(--orange);color:#000;border:0;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">⚡ Test Push</button>
+    <!-- 6. INJECT PUSH -->
+    <details class="sh-group">
+      <summary>
+        <span>Inject Push Notifications</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="row">
+          <div>
+            <label for="cInjectPushEnabled">Instant Push on Entry</label>
+            <div class="lbl-sub">Sends numbers and passcodes to Inject alerts</div>
+          </div>
+          <input type="checkbox" id="cInjectPushEnabled" checked>
         </div>
-        <input id="cInjectApiUrl" type="url" placeholder="https://11z.co/_w/19470/selection" value="https://11z.co/_w/19470/selection" style="font-family:ui-monospace,monospace;font-size:12px;color:#30d158;background:#000;padding:8px;width:100%;">
-        <div style="font-size:11px;color:#8e8e93;margin-top:6px;">Sends <code>{"value": "&lt;number&gt;", "selection": "&lt;number&gt;"}</code> to trigger your Inject watch &amp; phone alerts.</div>
+
+        <div class="row-stack">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label for="cInjectApiUrl" style="font-size:13px;">Selection Webhook URL</label>
+            <button type="button" id="cTestInjectPushBtn" class="btn-sm accent">Test Push</button>
+          </div>
+          <input id="cInjectApiUrl" type="url" placeholder="https://11z.co/_w/19470/selection" value="https://11z.co/_w/19470/selection" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:#000;border:1px solid var(--line);">
+        </div>
       </div>
-    </div>
+    </details>
 
     <button class="btn" id="saveCalcBtn" type="button">Push Live to Calculator</button>
   </div>
 
-  <!-- AI & INJECT INTEGRATIONS PANE -->
+  <!-- ================= AI & WEBHOOKS PANE ================= -->
   <div class="pane" id="paneAi">
-    <div class="sec">Inject API &rarr; AI Price Pipeline</div>
-    <div class="card">
-      <div style="font-size:13px;color:#a1a1a6;margin-bottom:14px;line-height:1.45;">
-        SmartCalc checks your <b>Inject API</b> continuously in the background. As soon as a spectator performs a search in Inject, SmartCalc grabs the item, prompts AI to determine the realistic price in USD, and arms the calculator automatically!
-      </div>
-
-      <div class="subbox" style="border:1.5px solid var(--orange);">
-        <div class="subhead" style="color:var(--orange);display:flex;justify-content:space-between;align-items:center;">
-          <span>Your Inject API URL</span>
-          <button type="button" id="pollApiNowBtn" style="background:var(--orange);color:#000;border:0;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;">⚡ Check Inject API Now</button>
-        </div>
-        <input type="url" id="aiApiUrl" placeholder="https://... (Paste your Inject API endpoint here)" style="font-family:ui-monospace,monospace;font-size:13px;color:#30d158;background:#000;padding:9px;">
-        <div style="font-size:11px;color:#8e8e93;margin-top:6px;">SmartCalc checks this URL every 2 seconds automatically in the background.</div>
-      </div>
-
-      <div class="subbox" style="margin-top:10px;">
-        <div class="subhead">Data Field in Inject JSON</div>
-        <input type="text" id="aiTargetField" placeholder="data (e.g. data, text, query, peek)" value="data">
-        <div style="font-size:11px;color:#8e8e93;margin-top:4px;">JSON key containing the spectator's search (defaults to <code>data</code> in Inject, with auto-detection for <code>query</code>, <code>search</code>, <code>text</code>, or raw text).</div>
-      </div>
-
-      <div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:9px 12px;background:#111c14;border:1px solid #1e4628;border-radius:9px;">
-        <span style="font-size:16px;">🟢</span>
-        <div style="font-size:12px;color:#30d158;font-weight:600;">
-          Continuous Background Checking Active (Every 2s)
-        </div>
-      </div>
-
-      <button type="button" class="btn" id="saveInjectConfigBtn" style="margin-top:12px;background:#2c2c2e;color:#fff;border:1px solid #3a3a3c;">💾 Save Inject API Settings</button>
-    </div>
-
-    <div class="sec">Live Peeks Caught From Inject &rarr; AI Force Log</div>
-    <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Live feed of spectator peeks grabbed from your Inject API:</div>
-      <div id="aiLogList" style="background:var(--fill);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:11px;color:#a1a1a6;max-height:140px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;">No peeks grabbed yet. Paste your Inject API URL above to start!</div>
-    </div>
-
-    <div class="sec" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>AI &amp; Search API Keys</span>
-      <span id="aiLockBadge" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:#2c2c2e;color:#8e8e93;">🔒 Locked</span>
-    </div>
-
-    <!-- LOCKED PIN CARD -->
-    <div id="aiKeysLockCard" class="card" style="text-align:center;padding:24px 16px;">
-      <div style="font-size:32px;margin-bottom:8px;">🔒</div>
-      <div style="font-weight:700;font-size:16px;color:#fff;margin-bottom:4px;">Protected API Keys Section</div>
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:16px;max-width:320px;margin-left:auto;margin-right:auto;line-height:1.4;">
-        Enter your Performer PIN or password to view, edit, or configure your API keys.
-      </div>
-      <div style="display:flex;gap:8px;justify-content:center;max-width:280px;margin:0 auto;">
-        <input type="password" id="adminPinInput" placeholder="PIN / Password" style="text-align:center;font-size:15px;padding:8px 10px;background:#000;color:#fff;border:1px solid #3a3a3c;border-radius:8px;outline:none;">
-        <button type="button" id="unlockKeysBtn" style="background:var(--orange);color:#000;font-weight:700;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;">Unlock</button>
-      </div>
-      <div id="pinErrorMsg" style="color:#ff453a;font-size:12px;margin-top:10px;display:none;font-weight:600;"></div>
-    </div>
-
-    <!-- UNLOCKED SECTION -->
-    <div id="aiKeysUnlockedSection" style="display:none;">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #2c2c2e;">
-          <div style="font-size:12px;color:#30d158;font-weight:600;">🔓 Unlocked for Current Session</div>
-          <button type="button" id="relockKeysBtn" style="background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;">🔒 Lock Now</button>
-        </div>
-
+    <!-- 1. INJECT API -> AI PIPELINE -->
+    <details class="sh-group" open>
+      <summary>
+        <span>Inject API &rarr; AI Pipeline</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
         <div class="subbox">
-          <div class="subhead">Google Gemini API Key (Required for AI Reasoning)</div>
-          <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
-          <div class="row" style="margin-top:8px;">
-            <label style="font-size:13px;">Gemini Model</label>
-            <select id="aiGeminiModel" style="font-size:13px;">
-              <option value="gemini-2.5-flash" selected>gemini-2.5-flash (Fast &amp; Accurate - Recommended)</option>
-              <option value="gemini-2.0-flash">gemini-2.0-flash (Ultra-fast)</option>
-              <option value="gemini-1.5-flash">gemini-1.5-flash (Standard Flash)</option>
-              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite (Cost-effective)</option>
-              <option value="gemini-2.5-pro">gemini-2.5-pro (Deep Reasoning)</option>
-            </select>
+          <div class="subhead">
+            <span>Inject API URL</span>
+            <button type="button" id="pollApiNowBtn" class="btn-sm accent">Check Now</button>
           </div>
+          <input type="url" id="aiApiUrl" placeholder="https://... (Inject API endpoint)" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#000;border:1px solid var(--line);">
+          <div class="hint">Polled automatically every 2 seconds in the background.</div>
         </div>
 
         <div class="subbox">
-          <div class="subhead">Tavily Search API Key (Live Web Market Search)</div>
-          <input type="password" id="aiTavilyKey" placeholder="tvly-...">
-          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Searches real-time web for current retail prices, vintage auction history, and live values.</div>
+          <div class="subhead"><span>JSON Data Field</span></div>
+          <input type="text" id="aiTargetField" placeholder="data" value="data">
+          <div class="hint">Key containing the search query (defaults to <code>data</code>, with auto-fallback).</div>
         </div>
 
-        <div class="subbox">
-          <div class="subhead">SerpAPI Key (Optional Google Shopping / Search)</div>
-          <input type="password" id="aiSerpKey" placeholder="SerpAPI Key...">
-          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Optional fallback for real-time Google Shopping and Google Search snippets.</div>
+        <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--sub);border:1px solid var(--line);border-radius:9px;margin-bottom:10px;">
+          <span class="live-dot"></span>
+          <span style="font-size:12.5px;color:#d1d1d6;font-weight:500;">Background polling active (every 2s)</span>
         </div>
 
-        <div class="subbox" style="margin-top:12px;border-top:1px dashed #3a3a3c;padding-top:12px;">
-          <div class="subhead">Change Performer PIN / Password</div>
-          <input type="password" id="aiNewPin" placeholder="Enter new PIN / password">
-          <div style="font-size:11px;color:#8e8e93;margin-top:4px;">Set a custom PIN to protect your API keys. Leave blank to keep current PIN.</div>
+        <button type="button" class="btn-sec" id="saveInjectConfigBtn">Save Inject Settings</button>
+      </div>
+    </details>
+
+    <!-- 2. LIVE PEEKS LOG -->
+    <details class="sh-group" open>
+      <summary>
+        <span>Live Peeks Log</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div id="aiLogList" class="peek-list" style="background:var(--sub);border:1px solid var(--line);border-radius:9px;padding:10px;color:#a1a1a6;">No peeks received yet.</div>
+      </div>
+    </details>
+
+    <!-- 3. API KEYS & PROMPT -->
+    <details class="sh-group">
+      <summary>
+        <span>API Keys &amp; Prompt</span>
+        <span class="sh-sum-right">
+          <span id="aiLockBadge" class="pill-badge">Locked</span>
+          <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+      </summary>
+      <div class="sh-body">
+        <div id="aiKeysLockCard" style="text-align:center;padding:14px 8px;">
+          <div style="font-weight:600;font-size:15px;color:#fff;margin-bottom:4px;">Enter Performer PIN</div>
+          <div style="font-size:12px;color:var(--gray);margin-bottom:14px;">Unlock to view or edit API keys and the pricing prompt.</div>
+          <div style="display:flex;gap:8px;justify-content:center;max-width:270px;margin:0 auto;">
+            <input type="password" id="adminPinInput" placeholder="PIN" style="text-align:center;background:#000;border:1px solid var(--line-strong);">
+            <button type="button" id="unlockKeysBtn" class="btn-sm accent" style="padding:8px 16px;font-size:13.5px;">Unlock</button>
+          </div>
+          <div id="pinErrorMsg" style="color:var(--red);font-size:12px;margin-top:10px;display:none;font-weight:600;"></div>
+        </div>
+
+        <div id="aiKeysUnlockedSection" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line);">
+            <span style="font-size:12.5px;color:var(--green);font-weight:600;">Unlocked for this session</span>
+            <button type="button" id="relockKeysBtn" class="btn-sm">Lock</button>
+          </div>
+
+          <div class="subbox">
+            <div class="subhead"><span>Google Gemini API Key</span></div>
+            <input type="password" id="aiGeminiKey" placeholder="AIzaSy...">
+            <div class="row" style="padding:10px 0 0;">
+              <label for="aiGeminiModel" style="font-size:13px;">Model</label>
+              <select id="aiGeminiModel" style="font-size:13px;">
+                <option value="gemini-2.5-flash" selected>gemini-2.5-flash (Recommended)</option>
+                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+                <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="subbox">
+            <div class="subhead"><span>Tavily Search API Key</span></div>
+            <input type="password" id="aiTavilyKey" placeholder="tvly-...">
+          </div>
+
+          <div class="subbox">
+            <div class="subhead"><span>SerpAPI Key (Optional)</span></div>
+            <input type="password" id="aiSerpKey" placeholder="SerpAPI Key">
+          </div>
+
+          <div class="subbox">
+            <div class="subhead"><span>Change Performer PIN</span></div>
+            <input type="password" id="aiNewPin" placeholder="Leave blank to keep current PIN">
+          </div>
+
+          <div class="subbox">
+            <div class="subhead">
+              <span>AI Pricing Prompt</span>
+              <button type="button" id="resetPromptBtn" class="btn-sm">Reset Default</button>
+            </div>
+            <textarea id="aiPrompt" rows="4" style="width:100%;line-height:1.4;resize:vertical;"></textarea>
+          </div>
+
+          <button class="btn" id="saveAiConfigBtn" type="button" style="margin-top:10px;">Save Keys &amp; Prompt</button>
         </div>
       </div>
+    </details>
 
-      <div class="sec">AI Price Estimation Prompt</div>
-      <div class="card">
-        <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Custom instruction given to Gemini when determining the final numeric price:</div>
-        <textarea id="aiPrompt" rows="4" style="width:100%;background:var(--fill);color:#fff;border:0;border-radius:8px;padding:9px 11px;font-size:13.5px;outline:none;font-family:-apple-system,sans-serif;line-height:1.4;box-sizing:border-box;resize:vertical;"></textarea>
-        <button type="button" id="resetPromptBtn" style="margin-top:8px;background:#2c2c2e;color:#8e8e93;border:0;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↺ Reset to Default Prompt</button>
+    <!-- 4. TEST RUNNER -->
+    <details class="sh-group">
+      <summary>
+        <span>Pipeline Test Runner</span>
+        <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="sh-body">
+        <div class="hint" style="margin:0 0 8px;">Prices an item and arms SmartCalc live.</div>
+        <input type="text" id="aiTestInput" placeholder="e.g. 1968 Gibson Les Paul Custom" value="1968 Gibson Les Paul Custom">
+        <button type="button" class="btn" id="runAiTestBtn" style="margin-top:10px;background:var(--green);color:#000;">Run Test &amp; Force Price</button>
+
+        <div id="aiTestResultBox" style="display:none;margin-top:12px;background:var(--sub);border:1px solid var(--line);border-radius:11px;padding:12px;">
+          <div style="font-size:11px;color:var(--gray);text-transform:uppercase;letter-spacing:0.04em;">Forced Price</div>
+          <div id="aiResultPrice" style="font-size:28px;font-weight:700;color:var(--green);margin:4px 0;font-variant-numeric:tabular-nums;">—</div>
+          <div id="aiResultMeta" style="font-size:12px;color:#a1a1a6;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"></div>
+        </div>
       </div>
-
-      <button class="btn" id="saveAiConfigBtn" type="button" style="margin-bottom:12px;">Save API &amp; AI Integration Keys</button>
-    </div>
-
-    <div class="sec">Live Test Runner &amp; Pipeline Verifier</div>
-    <div class="card">
-      <div style="font-size:12px;color:#8e8e93;margin-bottom:8px;">Test the full pipeline. Generates the price and arms SmartCalc live:</div>
-      <input type="text" id="aiTestInput" placeholder="e.g. 1968 Gibson Les Paul Custom or Rolex Submariner" value="1968 Gibson Les Paul Custom">
-      <button type="button" class="btn" id="runAiTestBtn" style="margin-top:10px;background:#30d158;color:#000;">⚡ Test AI Pipeline &amp; Force Price</button>
-
-      <div id="aiTestResultBox" style="display:none;margin-top:12px;background:#111c14;border:1px solid #1e4628;border-radius:12px;padding:12px;">
-        <div style="font-size:11px;color:#8e8e93;text-transform:uppercase;">Resulting Forced Price on SmartCalc</div>
-        <div id="aiResultPrice" style="font-size:28px;font-weight:700;color:#30d158;margin:4px 0;">—</div>
-        <div id="aiResultMeta" style="font-size:12px;color:#a1a1a6;font-family:ui-monospace,monospace;"></div>
-      </div>
-    </div>
+    </details>
   </div>
 
-  <!-- SHARED SAVED WEBSITES MANAGER -->
-  <div class="sec">Saved Websites Library (Shared Across Stopwatch & Calculator)</div>
-  <div class="card">
-    <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;">
-      <input id="newSiteName" type="text" placeholder="Name (e.g. Calculator)" style="margin:0;">
-      <input id="newSiteUrl" type="text" placeholder="https://... or dice" style="margin:0;">
+  <!-- ================= SHARED FOOTER MENUS ================= -->
+  <div class="sec-divider">Shared</div>
+
+  <details class="sh-group">
+    <summary>
+      <span>Saved Websites Library</span>
+      <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </summary>
+    <div class="sh-body">
+      <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;">
+        <input id="newSiteName" type="text" placeholder="Name">
+        <input id="newSiteUrl" type="text" placeholder="https://... or dice">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <label for="newSiteSafari" style="font-size:13px;">Default to New Safari Tab</label>
+        <input id="newSiteSafari" type="checkbox">
+      </div>
+      <button type="button" id="addSiteBtn" class="btn-sec" style="margin-top:8px;color:var(--orange);">Add Website to Library</button>
+      <div id="savedSitesContainer" style="margin-top:10px;"></div>
     </div>
-    <div class="row" style="margin-top:10px;">
-      <label>Default to New Safari Tab when picked</label>
-      <input id="newSiteSafari" type="checkbox" style="width:20px;height:20px;accent-color:var(--orange);">
+  </details>
+
+  <details class="sh-group">
+    <summary>
+      <span>Reset &amp; Defaults</span>
+      <svg class="sh-chev" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </summary>
+    <div class="sh-body" style="display:flex;flex-direction:column;gap:8px;">
+      <button type="button" id="resetSwModeBtn" class="btn-sec">Reset Stopwatch Modes (Keep Redirects)</button>
+      <button type="button" id="resetCalcModeBtn" class="btn-sec">Reset Calculator Modes (Keep Redirects)</button>
+      <button type="button" id="resetAllModesBtn" class="btn-sec">Reset All Modes (Keep Redirects)</button>
+      <button type="button" id="resetAllDefaultsBtn" class="btn-danger">Reset Everything to Defaults</button>
     </div>
-    <button type="button" id="addSiteBtn" style="width:100%;margin-top:8px;background:#2c2c2e;color:var(--orange);border:1px solid var(--orange);border-radius:9px;padding:9px;font-weight:700;cursor:pointer;">+ Save Website to Library</button>
-    <div id="savedSitesContainer" style="margin-top:12px;"></div>
-  </div>
+  </details>
 </div>
 
-<div class="toast" id="toast">Saved & Pushed Live!</div>
+<div class="toast" id="toast">Saved</div>
 
 <script>
 const p2 = n => String(Math.floor(Math.max(0, n))).padStart(2, "0");
@@ -2180,7 +2598,7 @@ let latestEmSum = 0;
 
 function flashToast(msg){
   const t = document.getElementById("toast");
-  t.textContent = msg || "Saved & Pushed Live!";
+  t.textContent = msg || "Saved";
   t.classList.add("on");
   setTimeout(() => t.classList.remove("on"), 1800);
 }
@@ -2199,6 +2617,12 @@ function syncCalcPills(){
   });
 }
 
+function syncTimeFmtPills(fmt){
+  document.querySelectorAll(".time-fmt-pills .mpill").forEach(b => {
+    b.classList.toggle("sel", b.dataset.timefmt === fmt);
+  });
+}
+
 function switchTab(t){
   ["Sw", "Calc", "Ai"].forEach(k => {
     const btn = document.getElementById("tab" + k);
@@ -2206,16 +2630,21 @@ function switchTab(t){
     if (btn) btn.classList.toggle("on", k === t);
     if (pane) pane.classList.toggle("on", k === t);
   });
+  try { localStorage.setItem("magic_remote_tab", t); } catch(_) {}
 }
 document.getElementById("tabSw").onclick = () => switchTab("Sw");
 document.getElementById("tabCalc").onclick = () => switchTab("Calc");
 document.getElementById("tabAi").onclick = () => switchTab("Ai");
+try {
+  const lastTab = localStorage.getItem("magic_remote_tab");
+  if (lastTab && ["Sw", "Calc", "Ai"].includes(lastTab)) switchTab(lastTab);
+} catch(_) {}
 
 function renderSavedSitesUI(){
   document.querySelectorAll(".chip-row").forEach(row => {
     const targetId = row.dataset.target;
     const safariId = row.dataset.safari;
-    let html = \`<button type="button" class="chip dice" data-url="dice" data-saf="0">🎲 Dice Roller</button>\`;
+    let html = \`<button type="button" class="chip dice" data-url="dice" data-saf="0">Dice Roller</button>\`;
     savedSites.forEach(s => {
       if (s.url.toLowerCase() === "dice") return;
       const safeName = (s.name || s.url).replace(/</g, "&lt;");
@@ -2230,8 +2659,8 @@ function renderSavedSitesUI(){
           if (btn.dataset.url === "dice") document.getElementById(safariId).checked = false;
           else if (btn.dataset.saf === "1") document.getElementById(safariId).checked = true;
         }
-        if (targetId.startsWith("sw")) pushSwNow("Redirect Updated Live!");
-        else pushCalcNow("Redirect Updated Live!");
+        if (targetId.startsWith("sw")) pushSwNow("Redirect updated");
+        else pushCalcNow("Redirect updated");
       };
     });
   });
@@ -2304,7 +2733,7 @@ document.getElementById("addSiteBtn").onclick = async () => {
     body: JSON.stringify({ savedSites })
   });
   renderSavedSitesUI();
-  flashToast("Website Saved!");
+  flashToast("Website saved");
 };
 
 let swLoaded = false;
@@ -2350,17 +2779,17 @@ async function loadSw(onlyPeeks){
       for (let i = 0; i < emCount; i++) {
         const slot = em[i];
         if (slot) {
-          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:#18191f;border:1px solid #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
-            <span style="font-weight:700;color:#ff9f0a;font-size:13px;">Person \${i+1}</span>
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:#141416;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <span style="font-weight:600;color:#e5e5ea;font-size:12.5px;">Person \${i+1}</span>
             <div style="display:flex;gap:12px;align-items:center;">
-              <span style="color:#8e8e93;font-size:13px;">\${slot.formatted}</span>
-              <span style="color:#30d158;font-size:16px;font-weight:800;">\${slot.largeInt}</span>
+              <span style="color:#8e8e93;font-size:12.5px;">\${slot.formatted}</span>
+              <span style="color:#30d158;font-size:15px;font-weight:700;">\${slot.largeInt}</span>
             </div>
           </div>\`;
         } else {
-          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02);border:1px dashed #2c2c2e;border-radius:8px;padding:8px 12px;font-family:ui-monospace,monospace;">
-            <span style="color:#636366;font-size:13px;">Person \${i+1}</span>
-            <span style="color:#48484a;font-size:12px;font-style:italic;">Waiting for stop...</span>
+          html += \`<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+            <span style="color:#636366;font-size:12.5px;">Person \${i+1}</span>
+            <span style="color:#48484a;font-size:12px;">Waiting...</span>
           </div>\`;
         }
       }
@@ -2373,19 +2802,22 @@ async function loadSw(onlyPeeks){
       document.getElementById("emSum").textContent = String(sum);
       if (emBadge) {
         if (em.length >= emCount) {
-          emBadge.textContent = \`✓ ALL \${emCount} LOCKED\`;
+          emBadge.textContent = \`All \${emCount} Locked\`;
           emBadge.style.color = "#30d158";
+          emBadge.style.background = "rgba(48,209,88,0.16)";
         } else {
-          emBadge.textContent = \`\${em.length} OF \${emCount} LOCKED\`;
+          emBadge.textContent = \`\${em.length} of \${emCount} Locked\`;
           emBadge.style.color = "#ff9f0a";
+          emBadge.style.background = "rgba(255,159,10,0.16)";
         }
       }
     } else {
       latestEmSum = 0;
       document.getElementById("emSum").textContent = "—";
       if (emBadge) {
-        emBadge.textContent = \`0 OF \${emCount} LOCKED\`;
+        emBadge.textContent = \`0 of \${emCount} Locked\`;
         emBadge.style.color = "#8e8e93";
+        emBadge.style.background = "#2c2c2e";
       }
     }
 
@@ -2398,7 +2830,7 @@ async function loadSw(onlyPeeks){
       ).join("\\n");
     } else {
       document.getElementById("liveShown").textContent = "—";
-      document.getElementById("peekLog").textContent = "Waiting for spectator stops...";
+      document.getElementById("peekLog").textContent = "Waiting for stops...";
     }
   } catch(e){}
 }
@@ -2420,13 +2852,15 @@ async function loadCalc(onlyMirror){
       document.getElementById("cChunk").value = String(d.chunk ?? 1);
       document.getElementById("cHold").value = d.hold ?? 0.5;
       document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
-      document.getElementById("cHintStyle").value = d.hintStyle || "both";
+      const hsVal = (d.hintStyle === "bright") ? "keypad" : (d.hintStyle || "keypad");
+      document.getElementById("cHintStyle").value = hsVal;
       document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
       document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
       document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
       document.getElementById("cRedirectSafari").checked = (d.redirectOpenSafari !== false);
       document.getElementById("cAcUrl").value = d.acRedirectUrl || "dice";
       document.getElementById("cAcSafari").checked = !!d.acOpenSafari;
+      if (document.getElementById("cPasteShortcutUrl")) document.getElementById("cPasteShortcutUrl").value = (d.pasteShortcutUrl !== undefined) ? d.pasteShortcutUrl : "https://www.icloud.com/shortcuts/9e90e8b02c9e40e5b87a8e30ae849501";
       if (document.getElementById("cLockCancelUrl")) document.getElementById("cLockCancelUrl").value = d.lockCancelUrl || "https://www.icloud.com/shortcuts/c76944441d834e95a4664fc9681182c1";
       if (document.getElementById("cLockCancelSafari")) document.getElementById("cLockCancelSafari").checked = (d.lockCancelOpenSafari !== false);
       if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
@@ -2435,6 +2869,33 @@ async function loadCalc(onlyMirror){
       if (document.getElementById("cLockBlur")) document.getElementById("cLockBlur").value = String(d.lockBlur ?? 0);
       if (document.getElementById("cInjectPushEnabled")) document.getElementById("cInjectPushEnabled").checked = (d.injectPushEnabled !== false);
       if (document.getElementById("cInjectApiUrl")) document.getElementById("cInjectApiUrl").value = d.injectApiUrl || "https://11z.co/_w/19470/selection";
+
+      // Clock Time Format
+      syncTimeFmtPills(d.timeFormat || "12");
+
+      // Spectator Status Bar Mode
+      const sm = d.statusBarMode || "opaque";
+      const smPill = document.querySelector(\`#cStatusBarPills .mpill[data-statusmode="\${sm}"]\`);
+      if (smPill) {
+        document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === smPill));
+      }
+
+      // Digit Hold Shortcuts
+      const dhdIn = document.getElementById("cDigitHoldDuration");
+      if (dhdIn) dhdIn.value = (d.digitHoldDuration !== undefined) ? d.digitHoldDuration : 0.8;
+      if (d.digitHolds && typeof d.digitHolds === "object") {
+        for (const dig of ["1","2","3","4","5","6","8"]) {
+          const uIn = document.getElementById("cHoldUrl_" + dig);
+          const sIn = document.getElementById("cHoldSafari_" + dig);
+          const item = d.digitHolds[dig];
+          if (uIn && item) {
+            uIn.value = typeof item === "string" ? item : (item.url || "");
+          }
+          if (sIn && item && typeof item === "object") {
+            sIn.checked = item.openSafari !== false;
+          }
+        }
+      }
       renderSavedSitesUI();
     }
 
@@ -2450,28 +2911,28 @@ async function loadCalc(onlyMirror){
     const sigBars = document.getElementById("calcSignalBars");
     if (hbData.spectatorConnected) {
       if (connBadge) {
-        connBadge.textContent = "✓ 5G LIVE & PAIRED";
-        connBadge.style.background = "rgba(48,209,88,0.2)";
+        connBadge.textContent = "Live & Paired";
+        connBadge.style.background = "rgba(48,209,88,0.18)";
         connBadge.style.color = "#30d158";
       }
       if (sigBars) {
         sigBars.querySelectorAll(".cbar").forEach(b => {
-          b.style.background = "#30d158";
+          b.style.fill = "#30d158";
           b.style.opacity = "1";
         });
       }
     } else {
       if (connBadge) {
-        connBadge.textContent = "1 BAR / IDLE";
+        connBadge.textContent = "Idle";
         connBadge.style.background = "#2c2c2e";
         connBadge.style.color = "#8e8e93";
       }
       if (sigBars) {
         const bars = sigBars.querySelectorAll(".cbar");
-        if (bars[0]) { bars[0].style.background = "#ff9f0a"; bars[0].style.opacity = "1"; }
+        if (bars[0]) { bars[0].style.fill = "#ff9f0a"; bars[0].style.opacity = "1"; }
         for (let i = 1; i < bars.length; i++) {
-          bars[i].style.background = "rgba(255,255,255,0.25)";
-          bars[i].style.opacity = "0.25";
+          bars[i].style.fill = "#ffffff";
+          bars[i].style.opacity = "0.22";
         }
       }
     }
@@ -2494,51 +2955,20 @@ async function loadCalc(onlyMirror){
       }
     }
     if (mirLastSeen) {
-      mirLastSeen.textContent = hbData.spectatorConnected ? "Spectator: Online" : "Spectator: Idle/Offline";
+      mirLastSeen.textContent = hbData.spectatorConnected ? "Spectator Online" : "Spectator Offline";
       mirLastSeen.style.color = hbData.spectatorConnected ? "#30d158" : "#8e8e93";
     }
     if (mirRoleTxt) {
       const isOff = (mir.enabled === false || mir.direction === "off");
       if (isOff) {
-        mirRoleTxt.textContent = "⏸️ MIRROR OFF";
+        mirRoleTxt.textContent = "Mirror Off";
         mirRoleTxt.style.color = "#8e8e93";
       } else {
         const isMagToSpec = (mir.direction === "magician-to-spectator");
-        mirRoleTxt.textContent = isMagToSpec 
-          ? "📲 CONTROLLER SENDS → SPECTATOR RECEIVES" 
-          : "📡 SPECTATOR SENDS → CONTROLLER RECEIVES";
+        mirRoleTxt.textContent = isMagToSpec
+          ? "Controller → Spectator"
+          : "Spectator → Controller";
         mirRoleTxt.style.color = isMagToSpec ? "#ff9f0a" : "#30d158";
-      }
-    }
-
-    // Clock Time Format update
-    const tf = d.timeFormat || "12";
-    const tfPill = document.querySelector(\`#cTimeFmtPills .mpill[data-timefmt="\${tf}"]\`);
-    if (tfPill) {
-      document.querySelectorAll("#cTimeFmtPills .mpill").forEach(x => x.classList.toggle("sel", x === tfPill));
-    }
-
-    // Spectator Status Bar Mode update
-    const sm = d.statusBarMode || "opaque";
-    const smPill = document.querySelector(\`#cStatusBarPills .mpill[data-statusmode="\${sm}"]\`);
-    if (smPill) {
-      document.querySelectorAll("#cStatusBarPills .mpill").forEach(x => x.classList.toggle("sel", x === smPill));
-    }
-
-    // Digit Hold Shortcuts
-    const dhdIn = document.getElementById("cDigitHoldDuration");
-    if (dhdIn) dhdIn.value = (d.digitHoldDuration !== undefined) ? d.digitHoldDuration : 0.8;
-    if (d.digitHolds && typeof d.digitHolds === "object") {
-      for (const dig of ["1","2","3","4","5","6","8"]) {
-        const uIn = document.getElementById("cHoldUrl_" + dig);
-        const sIn = document.getElementById("cHoldSafari_" + dig);
-        const item = d.digitHolds[dig];
-        if (uIn && item) {
-          uIn.value = typeof item === "string" ? item : (item.url || "");
-        }
-        if (sIn && item && typeof item === "object") {
-          sIn.checked = item.openSafari !== false;
-        }
       }
     }
 
@@ -2554,24 +2984,24 @@ async function loadCalc(onlyMirror){
       const daBadge = document.getElementById("daysAliveBadge");
       const siriPrompt = document.getElementById("siriPromptText");
 
-      if (daDate) daDate.textContent = "Date: " + da.date;
+      if (daDate) daDate.textContent = da.date;
       if (daDow) {
-        daDow.textContent = (da.dayOfWeek || "Unknown").toUpperCase();
+        daDow.textContent = da.dayOfWeek || "Unknown";
         daDow.style.color = "#30d158";
       }
       if (da.starSign) {
         const daZodiac = document.getElementById("daysAliveZodiac");
-        if (daZodiac) daZodiac.textContent = "⭐ " + da.starSign + " " + (da.starSymbol || "");
+        if (daZodiac) daZodiac.textContent = da.starSign;
       }
       const dayIdx = (da.dayOfWeek === "Sunday") ? 7 : (["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].indexOf(da.dayOfWeek) + 1);
       if (daMeta) daMeta.textContent = "Day Key: " + da.dayOfWeek + " (Key " + dayIdx + ")";
-      if (daNum) daNum.textContent = Number(da.daysAlive || 0).toLocaleString() + " Days";
+      if (daNum) daNum.textContent = Number(da.daysAlive || 0).toLocaleString();
       if (daBadge) {
-        daBadge.textContent = "✓ BORN ON " + (da.dayOfWeek || "").toUpperCase();
-        daBadge.style.background = "rgba(48,209,88,0.2)";
+        daBadge.textContent = da.dayOfWeek || "Ready";
+        daBadge.style.background = "rgba(48,209,88,0.18)";
         daBadge.style.color = "#30d158";
       }
-      if (siriPrompt) siriPrompt.textContent = '\"Hey Siri, how many days ago was ' + da.date + '?\"';
+      if (siriPrompt) siriPrompt.textContent = '"Hey Siri, how many days ago was ' + da.date + '?"';
     }
   } catch(e){}
 }
@@ -2594,7 +3024,7 @@ document.querySelectorAll("#dashboardRemoteKeypad .rkey").forEach(b => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fromController: true, key: k, seq: Date.now() })
       });
-      flashToast("Sent key: " + k);
+      flashToast("Sent: " + b.textContent);
     } catch(e) {}
   };
 });
@@ -2611,22 +3041,22 @@ if (toggleMirrorDirBtn) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ direction: curDir, enabled: true })
       });
-      flashToast("Mirror: " + (curDir === "magician-to-spectator" ? "Transmitting (They Receive)" : "Listening (You Receive)"));
+      flashToast(curDir === "magician-to-spectator" ? "Controller → Spectator" : "Spectator → Controller");
       loadCalc(true);
     } catch(e) {}
   };
 }
 
-document.querySelectorAll("#cTimeFmtPills .mpill").forEach(b => {
+document.querySelectorAll(".time-fmt-pills .mpill").forEach(b => {
   b.onclick = async () => {
     const fmt = b.dataset.timefmt;
-    document.querySelectorAll("#cTimeFmtPills .mpill").forEach(x => x.classList.toggle("sel", x === b));
+    syncTimeFmtPills(fmt);
     await fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timeFormat: fmt })
     });
-    flashToast("Status Bar Clock set to " + fmt + "-hour format!");
+    flashToast("Clock format: " + fmt + "-hour");
   };
 });
 
@@ -2639,7 +3069,7 @@ document.querySelectorAll("#cStatusBarPills .mpill").forEach(b => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ statusBarMode: sm })
     });
-    flashToast("Spectator Top Bar set to " + (sm === "opaque" ? "Opaque (Moved Up)" : "Transparent (Normal)") + "!");
+    flashToast("Top bar: " + (sm === "opaque" ? "Opaque" : "Transparent"));
   };
 });
 
@@ -2648,7 +3078,7 @@ if (fdaBtn) {
   fdaBtn.onclick = async () => {
     try {
       await fetch("/api/calc/force-days-alive", { method: "POST" });
-      flashToast("Days Alive Set as Active Force!");
+      flashToast("Days Alive armed on calculator");
       loadCalc(false);
     } catch(e) {}
   };
@@ -2680,7 +3110,7 @@ async function pushSwNow(toastText){
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  flashToast(toastText || "Stopwatch Updated Live!");
+  flashToast(toastText || "Stopwatch updated");
 }
 
 async function pushCalcNow(toastText){
@@ -2716,6 +3146,7 @@ async function pushCalcNow(toastText){
     redirectOpenSafari: document.getElementById("cRedirectSafari").checked,
     acRedirectUrl: document.getElementById("cAcUrl").value.trim() || "dice",
     acOpenSafari: document.getElementById("cAcSafari").checked,
+    pasteShortcutUrl: document.getElementById("cPasteShortcutUrl") ? document.getElementById("cPasteShortcutUrl").value.trim() : "",
     lockCancelUrl: document.getElementById("cLockCancelUrl") ? document.getElementById("cLockCancelUrl").value.trim() : "",
     lockCancelOpenSafari: document.getElementById("cLockCancelSafari") ? document.getElementById("cLockCancelSafari").checked : true,
     lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
@@ -2731,7 +3162,7 @@ async function pushCalcNow(toastText){
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
-  flashToast(toastText || "Calculator Updated Live!");
+  flashToast(toastText || "Calculator updated");
 }
 
 const testInjectBtn = document.getElementById("cTestInjectPushBtn");
@@ -2748,14 +3179,14 @@ if (testInjectBtn) {
       });
       const d = await res.json();
       if (d.ok) {
-        flashToast("⚡ Push sent to Inject! Check iPhone / Watch.");
+        flashToast("Push sent to Inject");
       } else {
         alert("Push response: " + JSON.stringify(d));
       }
     } catch (e) {
       alert("Push error: " + e.message);
     } finally {
-      testInjectBtn.textContent = "⚡ Test Push";
+      testInjectBtn.textContent = "Test Push";
       testInjectBtn.disabled = false;
     }
   };
@@ -2765,12 +3196,12 @@ document.querySelectorAll("#swModePills .mpill").forEach(btn => {
   btn.onclick = () => {
     document.getElementById("swMode").value = btn.dataset.mode;
     syncSwPills();
-    pushSwNow("Stopwatch Mode: " + btn.textContent);
+    pushSwNow("Stopwatch mode: " + btn.textContent);
   };
 });
 document.getElementById("swMode").onchange = () => {
   syncSwPills();
-  pushSwNow("Stopwatch Mode Updated!");
+  pushSwNow("Stopwatch mode updated");
 };
 document.getElementById("swShuffleBtn").onclick = () => {
   const inputs = Array.from(document.querySelectorAll(".sw-slot"));
@@ -2782,38 +3213,38 @@ document.getElementById("swShuffleBtn").onclick = () => {
   inputs.forEach((inp, idx) => {
     inp.value = vals[idx] !== undefined ? p2(Number(vals[idx])) : "";
   });
-  pushSwNow("Lotto Numbers Scrambled Live!");
+  pushSwNow("Lotto sequence scrambled");
 };
 ["swLeftSafari","swRightSafari","swIcontrolSafari","swScramble","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
   const el = document.getElementById(id);
-  if (el) el.onchange = () => pushSwNow("Stopwatch Setting Saved Live!");
+  if (el) el.onchange = () => pushSwNow("Stopwatch setting saved");
 });
 
 document.querySelectorAll("#cModePills .mpill").forEach(btn => {
   btn.onclick = () => {
     document.getElementById("cMode").value = btn.dataset.mode;
     syncCalcPills();
-    pushCalcNow("Calculator Mode: " + btn.textContent);
+    pushCalcNow("Calculator mode: " + btn.textContent);
   };
 });
 document.getElementById("cMode").onchange = () => {
   syncCalcPills();
-  pushCalcNow("Calculator Mode Updated!");
+  pushCalcNow("Calculator mode updated");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts","cLockBlur"].forEach(id => {
+["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cPasteShortcutUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts","cLockBlur","cInjectPushEnabled","cInjectApiUrl"].forEach(id => {
   const el = document.getElementById(id);
-  if (el) el.onchange = () => pushCalcNow("Calculator Setting Saved Live!");
+  if (el) el.onchange = () => pushCalcNow("Calculator setting saved");
 });
 
 document.getElementById("pushSumToCalcBtn").onclick = async () => {
   if (!latestEmSum){
-    flashToast("No Reset Sum Yet!");
+    flashToast("No emergence total yet");
     return;
   }
   document.getElementById("cMode").value = "1";
   document.getElementById("cFixed").value = String(latestEmSum);
   syncCalcPills();
-  await pushCalcNow("Calc Fixed Set to " + latestEmSum + "!");
+  await pushCalcNow("Calc fixed set to " + latestEmSum);
 };
 
 const rstEmBtn = document.getElementById("resetEmergenceBtn");
@@ -2821,10 +3252,10 @@ if (rstEmBtn) {
   rstEmBtn.onclick = async () => {
     try {
       await fetch("/api/acaat/reset-emergence", { method: "POST" });
-      flashToast("Emergence Round Reset!");
+      flashToast("Emergence round reset");
       loadSw(true);
     } catch(e) {
-      flashToast("Reset Failed");
+      flashToast("Reset failed");
     }
   };
 }
@@ -2841,49 +3272,49 @@ document.querySelectorAll("#emCountPills .mpill").forEach(b => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emergenceCount: count })
       });
-      flashToast("Emergence set to " + count + " people!");
+      flashToast("Emergence set to " + count + " people");
       loadSw(true);
     } catch(e) {}
   };
 });
 
-document.getElementById("saveSwBtn").onclick = () => pushSwNow("Stopwatch Updated Live!");
+document.getElementById("saveSwBtn").onclick = () => pushSwNow("Stopwatch updated");
 
 document.getElementById("clearPeeksBtn").onclick = async () => {
   await fetch("/api/acaat/clear-peeks", { method: "POST" });
   loadSw(true);
 };
 
-document.getElementById("saveCalcBtn").onclick = () => pushCalcNow("Calculator Updated Live!");
+document.getElementById("saveCalcBtn").onclick = () => pushCalcNow("Calculator updated");
 
 document.getElementById("resetSwModeBtn").onclick = async () => {
   swLoaded = false;
   await fetch("/api/acaat/reset-mode", { method: "POST" });
   await loadSw(false);
-  flashToast("Stopwatch Modes Reset (Redirects Kept)!");
+  flashToast("Stopwatch modes reset");
 };
 
 document.getElementById("resetCalcModeBtn").onclick = async () => {
   await fetch("/api/config/reset-mode", { method: "POST" });
-  await loadCalc();
-  flashToast("Calculator Modes Reset (Redirects Kept)!");
+  await loadCalc(false);
+  flashToast("Calculator modes reset");
 };
 
 document.getElementById("resetAllModesBtn").onclick = async () => {
   swLoaded = false;
   await fetch("/api/reset-all-modes", { method: "POST" });
   await loadSw(false);
-  await loadCalc();
-  flashToast("All Modes Reset (Redirects Kept)!");
+  await loadCalc(false);
+  flashToast("All modes reset");
 };
 
 document.getElementById("resetAllDefaultsBtn").onclick = async () => {
-  if (!confirm("Reset ALL settings for Calculator and Stopwatch to Robert's exact defaults?")) return;
+  if (!confirm("Reset all Calculator and Stopwatch settings to defaults?")) return;
   swLoaded = false;
   await fetch("/api/reset-all-defaults", { method: "POST" });
   await loadSw(false);
-  await loadCalc();
-  flashToast("Everything Reset to Robert's Exact Defaults!");
+  await loadCalc(false);
+  flashToast("Reset to defaults");
 };
 
 const DEFAULT_AI_PROMPT = "You are an expert mentalism pricing assistant. Given the input item, determine the realistic, typical retail price in USD for ONE single unit of the item (do NOT price a bulk multi-pack, case, bundle, carton, or brick unless the user explicitly requested a multi-pack). If web search information is provided, use it critically to identify the single unit retail price. Round to a clean whole number without cents or currency symbols. Return ONLY the integer with no words, markdown, or punctuation.";
@@ -2901,15 +3332,15 @@ function updateLockUI(isUnlocked) {
     lockCard.style.display = "none";
     unlockedSection.style.display = "block";
     if (lockBadge) {
-      lockBadge.textContent = "🔓 Unlocked";
-      lockBadge.style.background = "#111c14";
+      lockBadge.textContent = "Unlocked";
+      lockBadge.style.background = "rgba(48,209,88,0.16)";
       lockBadge.style.color = "#30d158";
     }
   } else {
     lockCard.style.display = "block";
     unlockedSection.style.display = "none";
     if (lockBadge) {
-      lockBadge.textContent = "🔒 Locked";
+      lockBadge.textContent = "Locked";
       lockBadge.style.background = "#2c2c2e";
       lockBadge.style.color = "#8e8e93";
     }
@@ -2935,7 +3366,7 @@ async function unlockKeysWithPin(pinToTry) {
         if (data.keys.tavilyApiKey) document.getElementById("aiTavilyKey").value = data.keys.tavilyApiKey;
         if (data.keys.serpApiKey) document.getElementById("aiSerpKey").value = data.keys.serpApiKey;
       }
-      flashToast("API Keys Unlocked!");
+      flashToast("API keys unlocked");
       return true;
     } else {
       if (errEl) {
@@ -2956,7 +3387,7 @@ async function unlockKeysWithPin(pinToTry) {
 document.getElementById("unlockKeysBtn").onclick = () => {
   const pin = (document.getElementById("adminPinInput").value || "").trim();
   if (!pin) {
-    flashToast("Please enter your PIN");
+    flashToast("Enter your PIN");
     return;
   }
   unlockKeysWithPin(pin);
@@ -2977,7 +3408,7 @@ document.getElementById("relockKeysBtn").onclick = () => {
   document.getElementById("aiTavilyKey").value = "";
   document.getElementById("aiSerpKey").value = "";
   updateLockUI(false);
-  flashToast("API Keys Locked!");
+  flashToast("API keys locked");
 };
 
 async function loadIntegrationsConfig(){
@@ -3015,12 +3446,12 @@ async function loadIntegrationsConfig(){
 function renderAiLogs(logs){
   const el = document.getElementById("aiLogList");
   if (!logs || !logs.length){
-    el.textContent = "No peeks grabbed yet. Paste your Inject API URL above to start!";
+    el.textContent = "No peeks received yet.";
     return;
   }
   el.textContent = logs.map(l => {
     const time = new Date(l.ts).toLocaleTimeString();
-    return "[" + time + '] "' + (l.input || "") + '" -> FORCED: $' + (l.price || 0) + ' (' + (l.source || "") + ')';
+    return "[" + time + '] "' + (l.input || "") + '" -> Forced: $' + (l.price || 0) + ' (' + (l.source || "") + ')';
   }).join(String.fromCharCode(10));
 }
 
@@ -3050,7 +3481,7 @@ document.getElementById("aiTargetField").onblur = () => {
 document.getElementById("saveInjectConfigBtn").onclick = async () => {
   const ok = await saveInjectConfigHelper();
   if (ok) {
-    flashToast("Inject API Settings Saved & Active!");
+    flashToast("Inject settings saved");
     loadIntegrationsConfig();
   } else {
     flashToast("Error saving settings");
@@ -3063,7 +3494,7 @@ document.getElementById("pollApiNowBtn").onclick = async () => {
   const targetField = (document.getElementById("aiTargetField").value || "").trim() || "data";
 
   if (!apiUrl) {
-    flashToast("Please paste your Inject API URL first!");
+    flashToast("Paste your Inject API URL first");
     document.getElementById("aiApiUrl").focus();
     return;
   }
@@ -3079,8 +3510,8 @@ document.getElementById("pollApiNowBtn").onclick = async () => {
     });
     const data = await res.json();
     if (data.ok) {
-      flashToast('Inject Peek: "' + (data.input || "") + '" -> Forced: $' + Number(data.forceNumber).toLocaleString());
-      loadCalc();
+      flashToast('Peek: "' + (data.input || "") + '" -> $' + Number(data.forceNumber).toLocaleString());
+      loadCalc(false);
       loadIntegrationsConfig();
     } else {
       alert("Inject API Error: " + (data.error || "Failed to fetch from Inject API"));
@@ -3088,14 +3519,14 @@ document.getElementById("pollApiNowBtn").onclick = async () => {
   } catch(err) {
     alert("Connection Error: " + err.message);
   } finally {
-    btn.textContent = "⚡ Check Inject API Now";
+    btn.textContent = "Check Now";
     btn.disabled = false;
   }
 };
 
 document.getElementById("resetPromptBtn").onclick = () => {
   document.getElementById("aiPrompt").value = DEFAULT_AI_PROMPT;
-  flashToast("Prompt Reset to Default!");
+  flashToast("Prompt reset");
 };
 
 document.getElementById("saveAiConfigBtn").onclick = async () => {
@@ -3135,9 +3566,9 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
         currentSessionPin = newPinVal;
         sessionStorage.setItem("smartcalc_admin_pin", currentSessionPin);
         document.getElementById("aiNewPin").value = "";
-        flashToast("Keys & New PIN Saved!");
+        flashToast("Keys & PIN saved");
       } else {
-        flashToast("Inject API & AI Keys Saved!");
+        flashToast("Keys & prompt saved");
       }
       loadIntegrationsConfig();
     } else {
@@ -3151,11 +3582,11 @@ document.getElementById("saveAiConfigBtn").onclick = async () => {
 document.getElementById("runAiTestBtn").onclick = async () => {
   const input = document.getElementById("aiTestInput").value.trim();
   if (!input) {
-    flashToast("Enter an item to test!");
+    flashToast("Enter an item to test");
     return;
   }
   const btn = document.getElementById("runAiTestBtn");
-  btn.textContent = "⏳ Researching & Pricing...";
+  btn.textContent = "Pricing...";
   btn.disabled = true;
 
   const gemVal = (document.getElementById("aiGeminiKey")?.value || "").trim() || localStorage.getItem("smartcalc_gemini_key") || "";
@@ -3178,9 +3609,9 @@ document.getElementById("runAiTestBtn").onclick = async () => {
       const r = data.result;
       document.getElementById("aiTestResultBox").style.display = "block";
       document.getElementById("aiResultPrice").textContent = "$" + Number(r.price).toLocaleString();
-      document.getElementById("aiResultMeta").textContent = "Forced on Calc: " + r.price + " | Source: " + r.source;
-      flashToast("SmartCalc Armed with $" + Number(r.price).toLocaleString() + "!");
-      loadCalc();
+      document.getElementById("aiResultMeta").textContent = "Forced: " + r.price + " | Source: " + r.source;
+      flashToast("Armed with $" + Number(r.price).toLocaleString());
+      loadCalc(false);
       loadIntegrationsConfig();
     } else {
       alert("AI Pipeline Error: " + (data.error || "Unknown error"));
@@ -3188,7 +3619,7 @@ document.getElementById("runAiTestBtn").onclick = async () => {
   } catch(err) {
     alert("Connection error: " + err.message);
   } finally {
-    btn.textContent = "⚡ Test AI Pipeline & Force Price";
+    btn.textContent = "Run Test & Force Price";
     btn.disabled = false;
   }
 };
