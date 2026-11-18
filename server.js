@@ -44,6 +44,7 @@ const DEFAULT_CALC_MODES = {
   hold: 0.15,
   autoOpOnLock: false,
   hintStyle: "keypad",
+  remoteHintStyle: "both",
   statusBarMode: "opaque",
   digitHoldDuration: 0.8,
   bdayAutoDetect: true,
@@ -363,6 +364,7 @@ app.post("/api/config", async (req, res) => {
   if (!isNaN(Number(b.offset))) state.calc.offset = Math.floor(Number(b.offset));
   if (typeof b.autoOpOnLock === "boolean") state.calc.autoOpOnLock = b.autoOpOnLock;
   if (["keypad", "both", "top", "old", "none", "dot", "bright"].includes(b.hintStyle)) state.calc.hintStyle = b.hintStyle;
+  if (["both", "history", "keypad", "none"].includes(b.remoteHintStyle)) state.calc.remoteHintStyle = b.remoteHintStyle;
   if (typeof b.redirectUrl === "string") state.calc.redirectUrl = b.redirectUrl.trim();
   if (typeof b.redirectOpenSafari === "boolean") state.calc.redirectOpenSafari = b.redirectOpenSafari;
   if (typeof b.clockSiteUrl === "string") state.calc.clockSiteUrl = b.clockSiteUrl.trim();
@@ -2216,13 +2218,19 @@ app.get("/", (req, res) => {
         </div>
 
         <div class="row">
-          <label for="cHintStyle">Covert Hint Style</label>
+          <label for="cHintStyle">Local Hint (Hold .)</label>
           <select id="cHintStyle">
-            <option value="keypad" selected>Keypad Edge Only (Default)</option>
-            <option value="both">Both (Top Bar + Keypad)</option>
-            <option value="top">Top Bar Only</option>
-            <option value="old">Keypad Outlines</option>
-            <option value="dot">Subtle Dot</option>
+            <option value="keypad" selected>Bolded Edge Only</option>
+            <option value="none">Off</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="cRemoteHintStyle">Remote Hint (Hold %)</label>
+          <select id="cRemoteHintStyle">
+            <option value="both" selected>Text + Highlighted Edge</option>
+            <option value="history">Gray Text Only</option>
+            <option value="keypad">Highlighted Edge Only</option>
             <option value="none">Off</option>
           </select>
         </div>
@@ -2266,6 +2274,18 @@ app.get("/", (req, res) => {
           <select id="cLockAttempts">
             <option value="1">1 Attempt</option>
             <option value="2">2 Attempts</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="cLockGlassStyle">Keypad Glass</label>
+            <div class="lbl-sub">Passcode button refraction style</div>
+          </div>
+          <select id="cLockGlassStyle">
+            <option value="liquid" selected>Liquid Lens (Strong Bend)</option>
+            <option value="crystal">Crystal Lens (Neutral)</option>
+            <option value="backdrop">Live Backdrop Glass</option>
           </select>
         </div>
 
@@ -2856,8 +2876,12 @@ async function loadCalc(onlyMirror){
       document.getElementById("cChunk").value = String(d.chunk ?? 1);
       document.getElementById("cHold").value = d.hold ?? 0.5;
       document.getElementById("cAutoOp").checked = !!d.autoOpOnLock;
-      const hsVal = (d.hintStyle === "bright") ? "keypad" : (d.hintStyle || "keypad");
+      const hsVal = (d.hintStyle === "none") ? "none" : "keypad";
       document.getElementById("cHintStyle").value = hsVal;
+      if (document.getElementById("cRemoteHintStyle")) {
+        const rhs = d.remoteHintStyle || "both";
+        document.getElementById("cRemoteHintStyle").value = ["both","history","keypad","none"].includes(rhs) ? rhs : "both";
+      }
       document.getElementById("cClockUrl").value = d.clockSiteUrl || "";
       document.getElementById("cClockSafari").checked = !!d.clockOpenSafari;
       document.getElementById("cRedirect").value = d.redirectUrl || "https://icontrol-magic.onrender.com/";
@@ -2870,6 +2894,10 @@ async function loadCalc(onlyMirror){
       if (document.getElementById("cLockEmergencyUrl")) document.getElementById("cLockEmergencyUrl").value = d.lockEmergencyUrl || "";
       if (document.getElementById("cLockEmergencySafari")) document.getElementById("cLockEmergencySafari").checked = (d.lockEmergencyOpenSafari !== false);
       if (document.getElementById("cLockAttempts")) document.getElementById("cLockAttempts").value = String(d.lockAttemptsToUnlock ?? 1);
+      if (document.getElementById("cLockGlassStyle")) {
+        const lgs = d.lockGlassStyle || "liquid";
+        document.getElementById("cLockGlassStyle").value = ["liquid","crystal","backdrop"].includes(lgs) ? lgs : "liquid";
+      }
       if (document.getElementById("cLockBlur")) document.getElementById("cLockBlur").value = String(d.lockBlur ?? 0);
       if (document.getElementById("cInjectPushEnabled")) document.getElementById("cInjectPushEnabled").checked = (d.injectPushEnabled !== false);
       if (document.getElementById("cInjectApiUrl")) document.getElementById("cInjectApiUrl").value = d.injectApiUrl || "https://11z.co/_w/19470/selection";
@@ -3141,6 +3169,7 @@ async function pushCalcNow(toastText){
     hold: Number(document.getElementById("cHold").value),
     autoOpOnLock: document.getElementById("cAutoOp").checked,
     hintStyle: document.getElementById("cHintStyle").value,
+    remoteHintStyle: document.getElementById("cRemoteHintStyle") ? document.getElementById("cRemoteHintStyle").value : "both",
     statusBarMode: activeSm,
     digitHoldDuration,
     digitHolds,
@@ -3156,6 +3185,7 @@ async function pushCalcNow(toastText){
     lockEmergencyUrl: document.getElementById("cLockEmergencyUrl") ? document.getElementById("cLockEmergencyUrl").value.trim() : "",
     lockEmergencyOpenSafari: document.getElementById("cLockEmergencySafari") ? document.getElementById("cLockEmergencySafari").checked : true,
     lockAttemptsToUnlock: document.getElementById("cLockAttempts") ? Number(document.getElementById("cLockAttempts").value) : 1,
+    lockGlassStyle: document.getElementById("cLockGlassStyle") ? document.getElementById("cLockGlassStyle").value : "liquid",
     lockBlur: document.getElementById("cLockBlur") ? Number(document.getElementById("cLockBlur").value) : 0,
     injectPushEnabled: document.getElementById("cInjectPushEnabled") ? document.getElementById("cInjectPushEnabled").checked : true,
     injectApiUrl: document.getElementById("cInjectApiUrl") ? document.getElementById("cInjectApiUrl").value.trim() : "https://11z.co/_w/19470/selection",
@@ -3219,9 +3249,12 @@ document.getElementById("swShuffleBtn").onclick = () => {
   });
   pushSwNow("Lotto sequence scrambled");
 };
-["swLeftSafari","swRightSafari","swIcontrolSafari","swScramble","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
+["swSingle","swLeftSafari","swRightSafari","swIcontrolSafari","swScramble","swDisarm","swTrigger","swLeftUrl","swRightUrl","swIcontrolUrl"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushSwNow("Stopwatch setting saved");
+});
+document.querySelectorAll(".sw-slot").forEach(inp => {
+  inp.onchange = () => pushSwNow("Lotto sequence saved");
 });
 
 document.querySelectorAll("#cModePills .mpill").forEach(btn => {
@@ -3235,10 +3268,16 @@ document.getElementById("cMode").onchange = () => {
   syncCalcPills();
   pushCalcNow("Calculator mode updated");
 };
-["cAutoOp","cHintStyle","cChunk","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cPasteShortcutUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts","cLockBlur","cInjectPushEnabled","cInjectApiUrl"].forEach(id => {
+["cFixed","cOffset","cHold","cAutoOp","cHintStyle","cRemoteHintStyle","cChunk","cDigitHoldDuration","cClockSafari","cRedirectSafari","cAcSafari","cClockUrl","cRedirect","cAcUrl","cPasteShortcutUrl","cLockCancelUrl","cLockCancelSafari","cLockEmergencyUrl","cLockEmergencySafari","cLockAttempts","cLockGlassStyle","cLockBlur","cInjectPushEnabled","cInjectApiUrl"].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.onchange = () => pushCalcNow("Calculator setting saved");
 });
+for (const dig of ["1","2","3","4","5","6","8"]) {
+  const uIn = document.getElementById("cHoldUrl_" + dig);
+  const sIn = document.getElementById("cHoldSafari_" + dig);
+  if (uIn) uIn.onchange = () => pushCalcNow("Key hold saved");
+  if (sIn) sIn.onchange = () => pushCalcNow("Key hold saved");
+}
 
 document.getElementById("pushSumToCalcBtn").onclick = async () => {
   if (!latestEmSum){
@@ -3424,8 +3463,6 @@ async function loadIntegrationsConfig(){
     if (d && d.integrations){
       const it = d.integrations;
       document.getElementById("aiApiUrl").value = it.apiUrl || "";
-      const ap = document.getElementById("aiAutoPoll");
-      if (ap) ap.checked = (it.autoPoll !== false);
       document.getElementById("aiTargetField").value = it.targetField || "data";
       document.getElementById("aiGeminiModel").value = it.geminiModel || "gemini-2.5-flash";
       document.getElementById("aiPrompt").value = it.prompt || DEFAULT_AI_PROMPT;
